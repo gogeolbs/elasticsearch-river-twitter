@@ -19,6 +19,10 @@
 
 package org.elasticsearch.river.twitter;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkProcessor;
@@ -40,13 +44,27 @@ import org.elasticsearch.river.River;
 import org.elasticsearch.river.RiverName;
 import org.elasticsearch.river.RiverSettings;
 import org.elasticsearch.threadpool.ThreadPool;
-import twitter4j.*;
+
+import twitter4j.FilterQuery;
+import twitter4j.GeoLocation;
+import twitter4j.HashtagEntity;
+import twitter4j.JSONObject;
+import twitter4j.PagableResponseList;
+import twitter4j.Status;
+import twitter4j.StatusAdapter;
+import twitter4j.StatusDeletionNotice;
+import twitter4j.Twitter;
+import twitter4j.TwitterException;
+import twitter4j.TwitterFactory;
+import twitter4j.TwitterObjectFactory;
+import twitter4j.TwitterStream;
+import twitter4j.TwitterStreamFactory;
+import twitter4j.URLEntity;
+import twitter4j.User;
+import twitter4j.UserMentionEntity;
+import twitter4j.UserStreamAdapter;
 import twitter4j.conf.Configuration;
 import twitter4j.conf.ConfigurationBuilder;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
 /**
  *
@@ -70,6 +88,10 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
     private final boolean raw;
     private final boolean ignoreRetweet;
     private final boolean geoAsArray;
+    private final boolean autoGenerateGeoPointFromPlace;
+    private final boolean collectOnlyGeoTweets;
+    private static final String LOCATION = "location";
+
 
     private final String indexName;
 
@@ -103,6 +125,8 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             Map<String, Object> twitterSettings = (Map<String, Object>) riverSettings.settings().get("twitter");
 
             raw = XContentMapValues.nodeBooleanValue(twitterSettings.get("raw"), false);
+            autoGenerateGeoPointFromPlace = XContentMapValues.nodeBooleanValue(twitterSettings.get("auto_generate_geo_point_from_place"), false);
+            collectOnlyGeoTweets = XContentMapValues.nodeBooleanValue(twitterSettings.get("collect_only_geo_tweets"), false);
             ignoreRetweet = XContentMapValues.nodeBooleanValue(twitterSettings.get("ignore_retweet"), false);
             geoAsArray = XContentMapValues.nodeBooleanValue(twitterSettings.get("geo_as_array"), false);
 
@@ -183,7 +207,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                 Object follow = filterSettings.get("follow");
                 if (follow != null) {
                     if (follow instanceof List) {
-                        List lFollow = (List) follow;
+                        List<?> lFollow = (List<?>) follow;
                         long[] followIds = new long[lFollow.size()];
                         for (int i = 0; i < lFollow.size(); i++) {
                             Object o = lFollow.get(i);
@@ -207,14 +231,14 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                 Object locations = filterSettings.get("locations");
                 if (locations != null) {
                     if (locations instanceof List) {
-                        List lLocations = (List) locations;
+                        List<?> lLocations = (List<?>) locations;
                         double[][] dLocations = new double[lLocations.size()][];
                         for (int i = 0; i < lLocations.size(); i++) {
                             Object loc = lLocations.get(i);
                             double lat;
                             double lon;
                             if (loc instanceof List) {
-                                List lLoc = (List) loc;
+                                List<?> lLoc = (List<?>) loc;
                                 if (lLoc.get(0) instanceof Number) {
                                     lon = ((Number) lLoc.get(0)).doubleValue();
                                 } else {
@@ -287,6 +311,8 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             // No specific settings. We need to use some defaults
             riverStreamType = "sample";
             raw = false;
+            autoGenerateGeoPointFromPlace = false;
+            collectOnlyGeoTweets = false;
             ignoreRetweet = false;
             geoAsArray = false;
             oauthConsumerKey = settings.get("river.twitter.oauth.consumer_key");
@@ -439,44 +465,55 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             return;
         }
 
-        // We push ES mapping only if raw is false
-        if (!raw) {
-            try {
-                logger.debug("Trying to create index [{}]", indexName);
-                client.admin().indices().prepareCreate(indexName).execute().actionGet();
-            } catch (Exception e) {
-                if (ExceptionsHelper.unwrapCause(e) instanceof IndexAlreadyExistsException) {
-                    // that's fine
-                    logger.debug("Index [{}] already exists, skipping...", indexName);
-                } else if (ExceptionsHelper.unwrapCause(e) instanceof ClusterBlockException) {
-                    // ok, not recovered yet..., lets start indexing and hope we recover by the first bulk
-                    // TODO: a smarter logic can be to register for cluster event listener here, and only start sampling when the block is removed...
-                    logger.debug("Cluster is blocked for now. Index [{}] can not be created, skipping...", indexName);
-                } else {
-                    logger.warn("failed to create index [{}], disabling river...", e, indexName);
-                    return;
-                }
+        try {
+            logger.debug("Trying to create index [{}]", indexName);
+            client.admin().indices().prepareCreate(indexName).execute().actionGet();
+        } catch (Exception e) {
+            if (ExceptionsHelper.unwrapCause(e) instanceof IndexAlreadyExistsException) {
+                // that's fine
+                logger.debug("Index [{}] already exists, skipping...", indexName);
+            } else if (ExceptionsHelper.unwrapCause(e) instanceof ClusterBlockException) {
+                // ok, not recovered yet..., lets start indexing and hope we recover by the first bulk
+                // TODO: a smarter logic can be to register for cluster event listener here, and only start sampling when the block is removed...
+                logger.debug("Cluster is blocked for now. Index [{}] can not be created, skipping...", indexName);
+            } else {
+                logger.warn("failed to create index [{}], disabling river...", e, indexName);
+                return;
             }
+        }
 
-            if (client.admin().indices().prepareGetMappings(indexName).setTypes(typeName).get().getMappings().isEmpty()) {
+        if (client.admin().indices().prepareGetMappings(indexName).setTypes(typeName).get().getMappings().isEmpty()) {
+        	String mapping = null;
+	        //If raw is false, we create a customized mapping
+	        if (!raw) {
                 try {
-                    String mapping = XContentFactory.jsonBuilder().startObject().startObject(typeName).startObject("properties")
-                            .startObject("location").field("type", "geo_point").endObject()
-                            .startObject("language").field("type", "string").field("index", "not_analyzed").endObject()
-                            .startObject("user").startObject("properties").startObject("screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
-                            .startObject("mention").startObject("properties").startObject("screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
-                            .startObject("in_reply").startObject("properties").startObject("user_screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
-                            .startObject("retweet").startObject("properties").startObject("user_screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
-                            .endObject().endObject().endObject().string();
-                    logger.debug("Applying default mapping for [{}]/[{}]: {}", indexName, typeName, mapping);
-                    client.admin().indices().preparePutMapping(indexName).setType(typeName).setSource(mapping).execute().actionGet();
+	                mapping = XContentFactory.jsonBuilder().startObject().startObject(typeName).startObject("properties")
+	                        .startObject("location").field("type", "geo_point").endObject()
+	                        .startObject("language").field("type", "string").field("index", "not_analyzed").endObject()
+	                        .startObject("user").startObject("properties").startObject("screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
+	                        .startObject("mention").startObject("properties").startObject("screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
+	                        .startObject("in_reply").startObject("properties").startObject("user_screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
+	                        .startObject("retweet").startObject("properties").startObject("user_screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
+	                        .endObject().endObject().endObject().string();
                 } catch (Exception e) {
                     logger.warn("failed to apply default mapping [{}]/[{}], disabling river...", e, indexName, typeName);
                     return;
                 }
-            } else {
-                logger.debug("Mapping already exists for [{}]/[{}], skipping...", indexName, typeName);
-            }
+	        } else {
+	        	//When raw is true, we create a mapping only with location like geo_point
+                try {
+                    mapping = XContentFactory.jsonBuilder().startObject().startObject(typeName).startObject("properties")
+                            .startObject(LOCATION).field("type", "geo_point").endObject().endObject().endObject().endObject().string();
+                } catch(Exception e) {
+                	logger.warn("failed to create geo mapping [{}]/[{}], disabling river...", e, indexName, typeName);
+                    return;
+                }
+	        }
+	        
+	        logger.debug("Applying default mapping for [{}]/[{}]: {}", indexName, typeName, mapping);
+            client.admin().indices().preparePutMapping(indexName).setType(typeName).setSource(mapping).execute().actionGet();
+        } else {
+            logger.debug("Mapping already exists for [{}]/[{}], skipping...", indexName, typeName);
         }
 
         // Creating bulk processor
@@ -574,6 +611,14 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
         @Override
         public void onStatus(Status status) {
             try {
+            	/*
+            	 * Return when it should collect only tweets with geo location and:
+            	 * 1 - Tweets not contains geo location, or
+            	 * 2 - When the tweet contains the place, but autoGenerateGeoPointFromPlace is false
+            	 */
+            	if(collectOnlyGeoTweets && status.getGeoLocation() == null && (status.getPlace() == null || (status.getPlace() != null && !autoGenerateGeoPointFromPlace) ))
+            		return;
+            	
                 // #24: We want to ignore retweets (default to false) https://github.com/elasticsearch/elasticsearch-river-twitter/issues/24
                 if (status.isRetweet() && ignoreRetweet) {
                     if (logger.isTraceEnabled()) {
@@ -587,6 +632,24 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                     // If we want to index tweets as is, we don't need to convert it to JSon doc
                     if (raw) {
                         String rawJSON = TwitterObjectFactory.getRawJSON(status);
+                        
+                        String location = null;
+                        
+                        if(status.getGeoLocation() != null){
+                    		double latitude = status.getGeoLocation().getLatitude();
+                    		double longitude = status.getGeoLocation().getLongitude();
+                    		location = latitude +"," + longitude;
+                    	}
+                        
+                        if(location == null && status.getPlace() != null && autoGenerateGeoPointFromPlace)
+                        	location = generateGeoPointFromPlace(status);
+                        
+						if (location != null) {
+							JSONObject newRawJson = new JSONObject(rawJSON);
+							newRawJson.append("location", location);
+							rawJSON = newRawJson.toString();
+						}
+                        
                         bulkProcessor.add(Requests.indexRequest(indexName).type(typeName).id(Long.toString(status.getId())).source(rawJSON));
                     } else {
                         XContentBuilder builder = XContentFactory.jsonBuilder().startObject();
@@ -665,6 +728,10 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                             }
                         }
                         if (status.getPlace() != null) {
+                        	if(status.getGeoLocation() == null && autoGenerateGeoPointFromPlace){
+                        		builder.field("location", generateGeoPointFromPlace(status));
+                        	}
+                        	
                             builder.startObject("place");
                             builder.field("id", status.getPlace().getId());
                             builder.field("name", status.getPlace().getName());
@@ -741,7 +808,24 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                 }
             });
         }
+        
+        private String generateGeoPointFromPlace(Status status){
+        	GeoLocation[][] boundingBoxCoordinates = status.getPlace().getBoundingBoxCoordinates();
+    		if(boundingBoxCoordinates != null && boundingBoxCoordinates.length > 0){
+    			GeoLocation[] geoLocations = boundingBoxCoordinates[0];
+    			double minx = geoLocations[0].getLongitude();
+    			double miny = geoLocations[0].getLatitude();
+    			double maxy = geoLocations[1].getLatitude();
+    			double maxx = geoLocations[2].getLongitude();
+    			
+    			double x = minx + Math.random() * (maxx - minx);
+    			double y = miny + Math.random() * (maxy - miny);
+    			return y +"," + x;
+    		}
+    		return null;
+        }
     }
+    
     
     private class UserStreamHandler extends UserStreamAdapter {
 
