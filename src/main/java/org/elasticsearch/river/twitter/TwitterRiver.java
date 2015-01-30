@@ -502,8 +502,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 	        } else {
 	        	//When raw is true, we create a mapping only with location like geo_point
                 try {
-                    mapping = XContentFactory.jsonBuilder().startObject().startObject(typeName).startObject("properties")
-                            .startObject(LOCATION).field("type", "geo_point").endObject().endObject().endObject().endObject().string();
+                	mapping = TwitterInfo.ES_MAPPING;
                 } catch(Exception e) {
                 	logger.warn("failed to create geo mapping [{}]/[{}], disabling river...", e, indexName, typeName);
                     return;
