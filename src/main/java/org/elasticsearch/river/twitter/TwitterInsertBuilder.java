@@ -7,9 +7,9 @@ import org.elasticsearch.common.xcontent.XContentFactory;
 
 import twitter4j.GeoLocation;
 import twitter4j.HashtagEntity;
-import twitter4j.JSONObject;
+import twitter4j.MediaEntity;
+import twitter4j.MediaEntity.Size;
 import twitter4j.Status;
-import twitter4j.TwitterObjectFactory;
 import twitter4j.URLEntity;
 import twitter4j.UserMentionEntity;
 
@@ -36,12 +36,22 @@ public class TwitterInsertBuilder {
         builder.field("text", status.getText());
         builder.field("source", status.getSource());
         builder.field("truncated", status.isTruncated());
-        builder.field("in_reply_to_status_id", status.getInReplyToStatusId());
-        builder.field("in_reply_to_user_id", status.getInReplyToUserId());
+        
+        if (status.getInReplyToStatusId() >= 0)
+        	builder.field("in_reply_to_status_id", status.getInReplyToStatusId());
+        if(status.getInReplyToUserId() >= 0)
+        	builder.field("in_reply_to_user_id", status.getInReplyToUserId());
         builder.field("in_reply_to_screen_name", status.getInReplyToScreenName());
-        builder.field("contributors", status.getContributors());
-        builder.field("retweet_count", status.getRetweetCount());
-        builder.field("favorite_count", status.getFavoriteCount());
+        
+        if (status.getContributors() != null && status.getContributors().length > 0) {
+            builder.array("contributors", status.getContributors());
+        }
+        if (status.getRetweetCount() >= 0) {
+            builder.field("retweet_count", status.getRetweetCount());
+        }
+        if (status.getFavoriteCount() >= 0) {
+            builder.field("favorite_count", status.getFavoriteCount());
+        }
         builder.field("favorited", status.isFavorited());
         builder.field("retweeted", status.isRetweeted());
         builder.field("possibly_sensitive", status.isPossiblySensitive());
@@ -56,13 +66,25 @@ public class TwitterInsertBuilder {
         builder.field("location", status.getUser().getLocation());
         builder.field("url", status.getUser().getURL());
         builder.field("description", status.getUser().getDescription());
-        builder.field("followers_count", status.getUser().getFollowersCount());
-        builder.field("friends_count", status.getUser().getFriendsCount());
-        builder.field("listed_count", status.getUser().getListedCount());
-        builder.field("favourites_count", status.getUser().getFavouritesCount());
-        builder.field("statuses_count", status.getUser().getStatusesCount());
+        if (status.getUser().getFollowersCount() >= 0) {
+            builder.field("followers_count", status.getUser().getFollowersCount());
+        }
+        if (status.getUser().getFriendsCount() >= 0) {
+            builder.field("friends_count", status.getUser().getFriendsCount());
+        }
+        if (status.getUser().getListedCount() >= 0) {
+            builder.field("listed_count", status.getUser().getListedCount());
+        }
+        if (status.getUser().getFavouritesCount() >= 0) {
+            builder.field("favourites_count", status.getUser().getFavouritesCount());
+        }
+        if (status.getUser().getStatusesCount() >= 0) {
+            builder.field("statuses_count", status.getUser().getStatusesCount());
+        }
         builder.field("created_at", status.getUser().getCreatedAt());
-        builder.field("utc_offset", status.getUser().getUtcOffset());
+        if (status.getUser().getUtcOffset() >= 0) {
+            builder.field("utc_offset", status.getUser().getUtcOffset());
+        }
         builder.field("time_zone", status.getUser().getTimeZone());
         builder.field("geo_enabled", status.getUser().isGeoEnabled());
         builder.field("lang", status.getUser().getLang());
@@ -86,101 +108,166 @@ public class TwitterInsertBuilder {
             builder.endObject();
         }
         
-        if (status.getUserMentionEntities() != null) {
-            builder.startArray("mention");
-            for (UserMentionEntity user : status.getUserMentionEntities()) {
-                builder.startObject();
-                builder.field("id", user.getId());
-                builder.field("name", user.getName());
-                builder.field("screen_name", user.getScreenName());
-                builder.field("start", user.getStart());
-                builder.field("end", user.getEnd());
-                builder.endObject();
-            }
-            builder.endArray();
-        }
-
-        if (status.getRetweetCount() != -1) {
-            builder.field("retweet_count", status.getRetweetCount());
-        }
-
-        if (status.isRetweet() && status.getRetweetedStatus() != null) {
-            builder.startObject("retweet");
-            builder.field("id", status.getRetweetedStatus().getId());
-            if (status.getRetweetedStatus().getUser() != null) {
-                builder.field("user_id", status.getRetweetedStatus().getUser().getId());
-                builder.field("user_screen_name", status.getRetweetedStatus().getUser().getScreenName());
-                if (status.getRetweetedStatus().getRetweetCount() != -1) {
-                    builder.field("retweet_count", status.getRetweetedStatus().getRetweetCount());
-                }
-            }
-            builder.endObject();
-        }
-
-        if (status.getInReplyToStatusId() != -1) {
-            builder.startObject("in_reply");
-            builder.field("status", status.getInReplyToStatusId());
-            if (status.getInReplyToUserId() != -1) {
-                builder.field("user_id", status.getInReplyToUserId());
-                builder.field("user_screen_name", status.getInReplyToScreenName());
-            }
-            builder.endObject();
-        }
-
+        //start Entities
+        builder.startObject("entities");
+        
+        //Hashtags	
         if (status.getHashtagEntities() != null) {
-            builder.startArray("hashtag");
+            builder.startArray("hashtags");
             for (HashtagEntity hashtag : status.getHashtagEntities()) {
                 builder.startObject();
                 builder.field("text", hashtag.getText());
-                builder.field("start", hashtag.getStart());
-                builder.field("end", hashtag.getEnd());
+                if(hashtag.getStart() >= 0)
+                	builder.field("start", hashtag.getStart());
+                if(hashtag.getEnd() >= 0)
+                	builder.field("end", hashtag.getEnd());
                 builder.endObject();
             }
             builder.endArray();
         }
-        if (status.getContributors() != null && status.getContributors().length > 0) {
-            builder.array("contributor", status.getContributors());
-        }
-        if (status.getGeoLocation() != null) {
-            if (geoAsArray) {
-                builder.startArray("location");
-                builder.value(status.getGeoLocation().getLongitude());
-                builder.value(status.getGeoLocation().getLatitude());
-                builder.endArray();
-            } else {
-                builder.startObject("location");
-                builder.field("lat", status.getGeoLocation().getLatitude());
-                builder.field("lon", status.getGeoLocation().getLongitude());
-                builder.endObject();
-            }
-        }
         
+        //urls
         if (status.getURLEntities() != null) {
-            builder.startArray("link");
+            builder.startArray("urls");
             for (URLEntity url : status.getURLEntities()) {
                 if (url != null) {
                     builder.startObject();
-                    if (url.getURL() != null) {
-                        builder.field("url", url.getURL());
-                    }
-                    if (url.getDisplayURL() != null) {
-                        builder.field("display_url", url.getDisplayURL());
-                    }
                     if (url.getExpandedURL() != null) {
                         builder.field("expand_url", url.getExpandedURL());
                     }
-                    builder.field("start", url.getStart());
-                    builder.field("end", url.getEnd());
+                    if(url.getStart() >= 0)
+                    	builder.field("start", url.getStart());
+                    if(url.getEnd() >= 0)
+                    	builder.field("end", url.getEnd());
+                    if (url.getDisplayURL() != null) {
+                        builder.field("display_url", url.getDisplayURL());
+                    }
+                    if (url.getURL() != null) {
+                        builder.field("url", url.getURL());
+                    }
                     builder.endObject();
                 }
             }
             builder.endArray();
         }
-
         
-
+        //User mentions
+        if (status.getUserMentionEntities() != null) {
+            builder.startArray("user_mentions");
+            for (UserMentionEntity mentions : status.getUserMentionEntities()) {
+                builder.startObject();
+                
+                if(mentions.getId() >= 0)
+                	builder.field("id", mentions.getId());
+                
+                builder.field("name", mentions.getName());
+                
+                if(mentions.getStart() >= 0)
+                	builder.field("start", mentions.getStart());
+                if(mentions.getEnd() >= 0)
+                	builder.field("end", mentions.getEnd());
+                
+                builder.field("screen_name", mentions.getScreenName());
+                builder.endObject();
+            }
+            builder.endArray();
+        }
+        
+        //Symbols with $
+        if (status.getSymbolEntities() != null) {
+            builder.startArray("symbols");
+            for (UserMentionEntity symbols : status.getUserMentionEntities()) {
+                builder.startObject();
+                builder.field("text", symbols.getText());
+                
+                if(symbols.getStart() >= 0)
+                	builder.field("start", symbols.getStart());
+                if(symbols.getEnd() >= 0)
+                	builder.field("end", symbols.getEnd());
+                builder.endObject();
+            }
+            builder.endArray();
+        }
+        
+        //Media
+        if (status.getMediaEntities() != null) {
+            builder.startArray("media");
+            for (MediaEntity media : status.getMediaEntities()) {
+            	builder.startObject();
+                builder.startObject("sizes");
+                constructBuilderSize("thumb", media.getSizes().get(MediaEntity.Size.THUMB), builder);
+                constructBuilderSize("small", media.getSizes().get(MediaEntity.Size.SMALL), builder);
+                constructBuilderSize("medium", media.getSizes().get(MediaEntity.Size.MEDIUM), builder);
+                constructBuilderSize("large", media.getSizes().get(MediaEntity.Size.LARGE), builder);
+                builder.endObject();
+                
+                if(media.getId() >= 0)
+                	builder.field("id", media.getId());
+                builder.field("media_url_https", media.getMediaURLHttps());
+                builder.field("media_url", media.getMediaURL());
+                builder.field("expanded_url", media.getExpandedURL());
+                
+                if(media.getStart() >= 0)
+                	builder.field("start", media.getStart());
+                if(media.getEnd() >= 0)
+                	builder.field("end", media.getEnd());
+                
+                builder.field("type", media.getType());
+                builder.field("display_url", media.getDisplayURL());
+                builder.field("url", media.getURL());
+                builder.endObject();
+            }
+            
+            builder.endArray();
+        }
+        
+        //end entities
         builder.endObject();
 
+        if(status.getScopes() != null && status.getScopes().getPlaceIds() != null) {
+	        //scopes
+	        builder.startArray("scopes");
+	        for(String placeId :status.getScopes().getPlaceIds()){
+	        	builder.startObject();
+	        	builder.field("place_ids", placeId);
+	        	builder.endObject();
+	        }
+	        builder.endArray();
+        }
+        
+        if(status.getExtendedMediaEntities() != null){
+	        //start Entities
+	        builder.startArray("extended_entities");
+	        for(MediaEntity media: status.getExtendedMediaEntities()){
+	        	builder.startObject();
+	            builder.startObject("sizes");
+	            constructBuilderSize("thumb", media.getSizes().get(MediaEntity.Size.THUMB), builder);
+	            constructBuilderSize("small", media.getSizes().get(MediaEntity.Size.SMALL), builder);
+	            constructBuilderSize("medium", media.getSizes().get(MediaEntity.Size.MEDIUM), builder);
+	            constructBuilderSize("large", media.getSizes().get(MediaEntity.Size.LARGE), builder);
+	            builder.endObject();
+	            
+	            if(media.getId() >= 0)
+	            	builder.field("id", media.getId());
+	            builder.field("media_url_https", media.getMediaURLHttps());
+	            builder.field("media_url", media.getMediaURL());
+	            builder.field("expanded_url", media.getExpandedURL());
+	            
+	            if(media.getStart() >= 0)
+	            	builder.field("start", media.getStart());
+	            if(media.getEnd() >= 0)
+	            	builder.field("end", media.getEnd());
+	            
+	            builder.field("type", media.getType());
+	            builder.field("display_url", media.getDisplayURL());
+	            builder.field("url", media.getURL());
+	            builder.endObject();
+	        }
+	        //end array extended entities
+	        builder.endArray();
+        }
+
+        //end tweet
         builder.endObject();
         
         return builder;
@@ -216,4 +303,17 @@ public class TwitterInsertBuilder {
  		}
  		return null;
      }
+	 
+	 private static void constructBuilderSize(String type, Size size, XContentBuilder builder) throws IOException{
+		 if(size == null)
+			 return;
+		 
+		 builder.startObject(type);
+		 builder.field("w", size.getWidth());
+		 String resize = size.getResize() == MediaEntity.Size.FIT ? "fit" : "crop";
+		 builder.field("resize", resize);
+		 builder.field("h", size.getHeight());
+		 builder.endObject();
+		 
+	 }
 }

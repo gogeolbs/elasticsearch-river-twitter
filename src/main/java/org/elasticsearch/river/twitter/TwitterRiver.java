@@ -48,7 +48,6 @@ import org.elasticsearch.threadpool.ThreadPool;
 import twitter4j.FilterQuery;
 import twitter4j.GeoLocation;
 import twitter4j.HashtagEntity;
-import twitter4j.JSONObject;
 import twitter4j.PagableResponseList;
 import twitter4j.Status;
 import twitter4j.StatusAdapter;
@@ -56,7 +55,6 @@ import twitter4j.StatusDeletionNotice;
 import twitter4j.Twitter;
 import twitter4j.TwitterException;
 import twitter4j.TwitterFactory;
-import twitter4j.TwitterObjectFactory;
 import twitter4j.TwitterStream;
 import twitter4j.TwitterStreamFactory;
 import twitter4j.URLEntity;
@@ -90,8 +88,6 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
     private final boolean geoAsArray;
     private final boolean autoGenerateGeoPointFromPlace;
     private final boolean collectOnlyGeoTweets;
-    private static final String LOCATION = "location";
-
 
     private final String indexName;
 
@@ -630,26 +626,10 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 
                     // If we want to index tweets as is, we don't need to convert it to JSon doc
                     if (raw) {
-                        String rawJSON = TwitterObjectFactory.getRawJSON(status);
+                    	XContentBuilder builder = TwitterInsertBuilder.constructInsertBuilder(status, autoGenerateGeoPointFromPlace, geoAsArray);
+                    	
+						bulkProcessor.add(Requests.indexRequest(indexName).type(typeName).id(Long.toString(status.getId())).source(builder));
                         
-                        String location = null;
-                        
-                        if(status.getGeoLocation() != null){
-                    		double latitude = status.getGeoLocation().getLatitude();
-                    		double longitude = status.getGeoLocation().getLongitude();
-                    		location = latitude +"," + longitude;
-                    	}
-                        
-                        if(location == null && status.getPlace() != null && autoGenerateGeoPointFromPlace)
-                        	location = generateGeoPointFromPlace(status);
-                        
-						if (location != null) {
-							JSONObject newRawJson = new JSONObject(rawJSON);
-							newRawJson.append("location", location);
-							rawJSON = newRawJson.toString();
-						}
-                        
-                        bulkProcessor.add(Requests.indexRequest(indexName).type(typeName).id(Long.toString(status.getId())).source(rawJSON));
                     } else {
                         XContentBuilder builder = XContentFactory.jsonBuilder().startObject();
                         builder.field("text", status.getText());
