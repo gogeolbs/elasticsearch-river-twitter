@@ -91,6 +91,8 @@ public class TwitterInsertBuilder {
         builder.field("profile_background_image_url", status.getUser().getProfileBackgroundImageURL());
         builder.field("profile_image_url", status.getUser().getProfileImageURL());
         builder.field("profile_banner_url", status.getUser().getProfileBannerURL());
+        //end User
+        builder.endObject();
         
         //Place
         if (status.getPlace() != null) {
@@ -102,8 +104,14 @@ public class TwitterInsertBuilder {
             builder.field("full_name", status.getPlace().getFullName());
             builder.field("country_code", status.getPlace().getCountryCode());
             builder.field("country", status.getPlace().getCountry());
+            
+            builder.startObject("attributes");
             builder.field("street_address", status.getPlace().getStreetAddress());
-            builder.startObject("bounding_box").field("type", "envelope").field("coordinates", getEnvelopeFromPlace(status.getPlace().getBoundingBoxCoordinates())).endObject();
+            builder.endObject();
+            
+            builder.startObject("bounding_box");
+            getEnvelopeFromPlace(status.getPlace().getBoundingBoxCoordinates(), builder);
+            builder.endObject();
             
             builder.endObject();
         }
@@ -273,8 +281,8 @@ public class TwitterInsertBuilder {
         return builder;
 	}
 	
-	private static String getEnvelopeFromPlace(
-			GeoLocation[][] boundingBoxCoordinates) {
+	private static void getEnvelopeFromPlace(
+			GeoLocation[][] boundingBoxCoordinates, XContentBuilder builder) throws IOException {
 		if (boundingBoxCoordinates != null && boundingBoxCoordinates.length > 0) {
 			GeoLocation[] geoLocations = boundingBoxCoordinates[0];
 			double minx = geoLocations[0].getLongitude();
@@ -282,11 +290,17 @@ public class TwitterInsertBuilder {
 			double maxy = geoLocations[1].getLatitude();
 			double maxx = geoLocations[2].getLongitude();
 
-			return  "[ [" +minx +", " +maxy +", [" +maxx +", " +miny +"] ]";
+	        builder.field("type", "envelope");
+	        builder.startArray("coordinates");
+	        toXContent(builder, minx, maxy);
+	        toXContent(builder, maxx, miny);
+	        builder.endArray();
 		}
-		
-		return null;
 	}
+	
+	private static XContentBuilder toXContent(XContentBuilder builder, double x, double y) throws IOException {
+        return builder.startArray().value(x).value(y).endArray();
+    }
 	 
 	 private static String generateGeoPointFromPlace(Status status){
      	GeoLocation[][] boundingBoxCoordinates = status.getPlace().getBoundingBoxCoordinates();
