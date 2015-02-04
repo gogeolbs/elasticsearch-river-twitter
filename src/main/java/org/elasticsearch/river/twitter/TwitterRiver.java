@@ -55,6 +55,7 @@ import twitter4j.StatusDeletionNotice;
 import twitter4j.Twitter;
 import twitter4j.TwitterException;
 import twitter4j.TwitterFactory;
+import twitter4j.TwitterObjectFactory;
 import twitter4j.TwitterStream;
 import twitter4j.TwitterStreamFactory;
 import twitter4j.URLEntity;
@@ -88,11 +89,14 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
     private final boolean geoAsArray;
     private final boolean autoGenerateGeoPointFromPlace;
     private final boolean collectOnlyGeoTweets;
+    
 
     private final String indexName;
 
     private final String typeName;
 
+    private static final int DEFAULT_MAX_INDEX_SIZE = 100000000;
+    private final int maxIndexSize;
     private final int bulkSize;
     private final int maxConcurrentBulk;
     private final TimeValue bulkFlushInterval;
@@ -121,7 +125,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             Map<String, Object> twitterSettings = (Map<String, Object>) riverSettings.settings().get("twitter");
 
             raw = XContentMapValues.nodeBooleanValue(twitterSettings.get("raw"), false);
-            autoGenerateGeoPointFromPlace = XContentMapValues.nodeBooleanValue(twitterSettings.get("auto_generate_geo_point_from_place"), false);
+            autoGenerateGeoPointFromPlace = XContentMapValues.nodeBooleanValue(twitterSettings.get("auto_generate_geo_point_from_place"), true);
             collectOnlyGeoTweets = XContentMapValues.nodeBooleanValue(twitterSettings.get("collect_only_geo_tweets"), false);
             ignoreRetweet = XContentMapValues.nodeBooleanValue(twitterSettings.get("ignore_retweet"), false);
             geoAsArray = XContentMapValues.nodeBooleanValue(twitterSettings.get("geo_as_array"), false);
@@ -177,6 +181,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                 stream = null;
                 streamType = null;
                 indexName = null;
+                maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
                 typeName = "status";
                 bulkSize = 100;
                 this.maxConcurrentBulk = 1;
@@ -283,6 +288,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                 if (!filterSet) {
                     streamType = null;
                     indexName = null;
+                    maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
                     typeName = "status";
                     bulkSize = 100;
                     this.maxConcurrentBulk = 1;
@@ -307,7 +313,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             // No specific settings. We need to use some defaults
             riverStreamType = "sample";
             raw = false;
-            autoGenerateGeoPointFromPlace = false;
+            autoGenerateGeoPointFromPlace = true;
             collectOnlyGeoTweets = false;
             ignoreRetweet = false;
             geoAsArray = false;
@@ -326,6 +332,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             stream = null;
             streamType = null;
             indexName = null;
+            maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
             typeName = "status";
             bulkSize = 100;
             this.maxConcurrentBulk = 1;
@@ -337,6 +344,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
         if (riverSettings.settings().containsKey("index")) {
             Map<String, Object> indexSettings = (Map<String, Object>) riverSettings.settings().get("index");
             indexName = XContentMapValues.nodeStringValue(indexSettings.get("index"), riverName.name());
+            maxIndexSize = XContentMapValues.nodeIntegerValue(indexSettings.get("max_index_size"), DEFAULT_MAX_INDEX_SIZE);;
             typeName = XContentMapValues.nodeStringValue(indexSettings.get("type"), "status");
             this.bulkSize = XContentMapValues.nodeIntegerValue(indexSettings.get("bulk_size"), 100);
             this.bulkFlushInterval = TimeValue.parseTimeValue(XContentMapValues.nodeStringValue(
@@ -344,6 +352,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             this.maxConcurrentBulk = XContentMapValues.nodeIntegerValue(indexSettings.get("max_concurrent_bulk"), 1);
         } else {
             indexName = riverName.name();
+            maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
             typeName = "status";
             bulkSize = 100;
             this.maxConcurrentBulk = 1;

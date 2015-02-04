@@ -125,10 +125,10 @@ public class TwitterInsertBuilder {
             for (HashtagEntity hashtag : status.getHashtagEntities()) {
                 builder.startObject();
                 builder.field("text", hashtag.getText());
-                if(hashtag.getStart() >= 0)
-                	builder.field("start", hashtag.getStart());
-                if(hashtag.getEnd() >= 0)
-                	builder.field("end", hashtag.getEnd());
+                
+                if(hashtag.getStart() >= 0 && hashtag.getEnd() >= 0){
+                	builder.array("indices", hashtag.getStart(), hashtag.getEnd());
+                }
                 builder.endObject();
             }
             builder.endArray();
@@ -143,10 +143,11 @@ public class TwitterInsertBuilder {
                     if (url.getExpandedURL() != null) {
                         builder.field("expand_url", url.getExpandedURL());
                     }
-                    if(url.getStart() >= 0)
-                    	builder.field("start", url.getStart());
-                    if(url.getEnd() >= 0)
-                    	builder.field("end", url.getEnd());
+                    
+                    if(url.getStart() >= 0 && url.getEnd() >= 0){
+                    	builder.array("indices", url.getStart(), url.getEnd());
+                    }
+                    
                     if (url.getDisplayURL() != null) {
                         builder.field("display_url", url.getDisplayURL());
                     }
@@ -170,10 +171,9 @@ public class TwitterInsertBuilder {
                 
                 builder.field("name", mentions.getName());
                 
-                if(mentions.getStart() >= 0)
-                	builder.field("start", mentions.getStart());
-                if(mentions.getEnd() >= 0)
-                	builder.field("end", mentions.getEnd());
+                if(mentions.getStart() >= 0 && mentions.getEnd() >= 0){
+                	builder.array("indices", mentions.getStart(), mentions.getEnd());
+                }
                 
                 builder.field("screen_name", mentions.getScreenName());
                 builder.endObject();
@@ -188,10 +188,10 @@ public class TwitterInsertBuilder {
                 builder.startObject();
                 builder.field("text", symbols.getText());
                 
-                if(symbols.getStart() >= 0)
-                	builder.field("start", symbols.getStart());
-                if(symbols.getEnd() >= 0)
-                	builder.field("end", symbols.getEnd());
+                if(symbols.getStart() >= 0 && symbols.getEnd() >= 0){
+                	builder.array("indices", symbols.getStart(), symbols.getEnd());
+                }
+                
                 builder.endObject();
             }
             builder.endArray();
@@ -215,10 +215,10 @@ public class TwitterInsertBuilder {
                 builder.field("media_url", media.getMediaURL());
                 builder.field("expanded_url", media.getExpandedURL());
                 
-                if(media.getStart() >= 0)
-                	builder.field("start", media.getStart());
-                if(media.getEnd() >= 0)
-                	builder.field("end", media.getEnd());
+                if(media.getStart() >= 0 && media.getEnd() >= 0){
+                	builder.array("indices", media.getStart(), media.getEnd());
+                }
+                
                 
                 builder.field("type", media.getType());
                 builder.field("display_url", media.getDisplayURL());
@@ -261,10 +261,9 @@ public class TwitterInsertBuilder {
 	            builder.field("media_url", media.getMediaURL());
 	            builder.field("expanded_url", media.getExpandedURL());
 	            
-	            if(media.getStart() >= 0)
-	            	builder.field("start", media.getStart());
-	            if(media.getEnd() >= 0)
-	            	builder.field("end", media.getEnd());
+	            if(media.getStart() >= 0 && media.getEnd() >= 0){
+                	builder.array("indices", media.getStart(), media.getEnd());
+                }
 	            
 	            builder.field("type", media.getType());
 	            builder.field("display_url", media.getDisplayURL());
