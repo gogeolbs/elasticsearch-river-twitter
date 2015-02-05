@@ -2,7 +2,6 @@ package org.elasticsearch.river.twitter.utils;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.util.Date;
 import java.util.Iterator;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -80,7 +79,6 @@ public class DirectInsertES {
 				Status status = TwitterObjectFactory.createStatus(json.toString());
 				id = Long.toString(status.getId());
 				xBuilder = TwitterInsertBuilder.constructInsertBuilder(status, true, false);
-				handleJson(json);
 			}catch (Exception e) {
 				lineWithErrorsOnFile++;
 				line = br.readLine();
@@ -145,47 +143,6 @@ public class DirectInsertES {
 	        }
 
 	    }
-	}
-
-	public static void handleJson(JSONObject json) throws JSONException, java.text.ParseException{
-		Object object = json.get("created_at");
-		if(object != null && object instanceof String){
-			Date date = null;
-			try {
-			 date = DateUtil.parse((String) object);
-			} catch(Exception e) {
-			}
-			
-			json.remove("created_at");
-			if(date != null)
-				json.put("created_at", date);
-		}
-		
-		JSONObject userJson = json.getJSONObject("user");
-		if(userJson != null) {
-			object = userJson.get("created_at");
-			if(object != null && object instanceof String){
-				Date date = null;
-				try {
-				 date = DateUtil.parse((String) object);
-				} catch(Exception e) {
-				}
-				
-				userJson.remove("created_at");
-				if(date != null)
-					userJson.put("created_at", date);
-			}
-			
-			object = userJson.get("location");
-			if(object != null && object instanceof String){
-				String location = (String) object;
-				if(location.contains(";"))
-					userJson.remove("location");
-			}
-			
-			json.remove("user");
-			json.put("user", userJson);
-		}
 	}
 
 	public void close() {
