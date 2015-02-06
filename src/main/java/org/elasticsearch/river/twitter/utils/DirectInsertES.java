@@ -185,6 +185,7 @@ public class DirectInsertES {
 		try {
 			if(args.length != 3) {
 				System.out.println("You should enter the following arguments: [elasticsearch ip] [elasticsearch index name] [elasticsearch cluster name]");
+				System.exit(0);
 			}
 			//WARN Configurações do welder 
 			String seed = args[0];

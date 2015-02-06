@@ -24,6 +24,16 @@ import java.util.List;
 import java.util.Map;
 
 import org.elasticsearch.ExceptionsHelper;
+import org.elasticsearch.action.ActionFuture;
+import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
+import org.elasticsearch.action.admin.indices.alias.exists.AliasesExistResponse;
+import org.elasticsearch.action.admin.indices.alias.get.GetAliasesRequest;
+import org.elasticsearch.action.admin.indices.alias.get.GetAliasesResponse;
+import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.elasticsearch.action.admin.indices.get.GetIndexRequest;
+import org.elasticsearch.action.admin.indices.stats.IndexStats;
+import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequest;
+import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
 import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.action.bulk.BulkRequest;
@@ -32,6 +42,7 @@ import org.elasticsearch.client.Client;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.hppc.cursors.ObjectCursor;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
@@ -90,12 +101,17 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
     private final boolean collectOnlyGeoTweets;
     
 
-    private final String indexName;
+    private final String queryIndexAliasName;
+    private String insertIndexAliasName;
+    private int indexVersion = 1;
+    private String indexName;
 
     private final String typeName;
 
-    private static final int DEFAULT_MAX_INDEX_SIZE = 100000000;
-    private final int maxIndexSize;
+    private static final long DEFAULT_MAX_EACH_INDEX_SIZE =  100000000;
+    private static final long DEFAULT_MAX_INDEX_SIZE = 10000000000L;
+    private final long maxEachAliasIndexSize;
+    private final long maxIndexSize;
     private final int bulkSize;
     private final int maxConcurrentBulk;
     private final TimeValue bulkFlushInterval;
@@ -119,6 +135,8 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
         this.threadPool = threadPool;
 
         String riverStreamType;
+        
+        logger.debug("Configuring Twitter River...");
 
         if (riverSettings.settings().containsKey("twitter")) {
             Map<String, Object> twitterSettings = (Map<String, Object>) riverSettings.settings().get("twitter");
@@ -180,6 +198,8 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                 stream = null;
                 streamType = null;
                 indexName = null;
+                queryIndexAliasName = indexName;
+                maxEachAliasIndexSize = DEFAULT_MAX_EACH_INDEX_SIZE;
                 maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
                 typeName = "status";
                 bulkSize = 100;
@@ -287,6 +307,8 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                 if (!filterSet) {
                     streamType = null;
                     indexName = null;
+                    queryIndexAliasName = indexName;
+                    maxEachAliasIndexSize = DEFAULT_MAX_EACH_INDEX_SIZE;
                     maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
                     typeName = "status";
                     bulkSize = 100;
@@ -331,6 +353,8 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             stream = null;
             streamType = null;
             indexName = null;
+            queryIndexAliasName = indexName;
+            maxEachAliasIndexSize = DEFAULT_MAX_EACH_INDEX_SIZE;
             maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
             typeName = "status";
             bulkSize = 100;
@@ -343,7 +367,8 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
         if (riverSettings.settings().containsKey("index")) {
             Map<String, Object> indexSettings = (Map<String, Object>) riverSettings.settings().get("index");
             indexName = XContentMapValues.nodeStringValue(indexSettings.get("index"), riverName.name());
-            maxIndexSize = XContentMapValues.nodeIntegerValue(indexSettings.get("max_index_size"), DEFAULT_MAX_INDEX_SIZE);;
+            maxEachAliasIndexSize = XContentMapValues.nodeLongValue(indexSettings.get("max_each_alias_index_size"), DEFAULT_MAX_EACH_INDEX_SIZE);
+            maxIndexSize = XContentMapValues.nodeLongValue(indexSettings.get("max_index_size"), DEFAULT_MAX_INDEX_SIZE);
             typeName = XContentMapValues.nodeStringValue(indexSettings.get("type"), "status");
             this.bulkSize = XContentMapValues.nodeIntegerValue(indexSettings.get("bulk_size"), 100);
             this.bulkFlushInterval = TimeValue.parseTimeValue(XContentMapValues.nodeStringValue(
@@ -351,6 +376,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             this.maxConcurrentBulk = XContentMapValues.nodeIntegerValue(indexSettings.get("max_concurrent_bulk"), 1);
         } else {
             indexName = riverName.name();
+            maxEachAliasIndexSize = DEFAULT_MAX_EACH_INDEX_SIZE;
             maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
             typeName = "status";
             bulkSize = 100;
@@ -363,6 +389,8 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             logger.debug("will index twitter raw content...");
         }
 
+        insertIndexAliasName = indexName +"_index";
+        queryIndexAliasName = indexName;
         streamType = riverStreamType;
         stream = buildTwitterStream();
     }
@@ -465,15 +493,34 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 
     @Override
     public void start() {
+    	logger.debug("Starting Twitter River...");
         if (stream == null) {
             return;
         }
 
         try {
+        	indexName = indexName +"_" +indexVersion;
             logger.debug("Trying to create index [{}]", indexName);
             client.admin().indices().prepareCreate(indexName).execute().actionGet();
+            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(insertIndexAliasName, indexName)).actionGet();
+            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(queryIndexAliasName, indexName)).actionGet();
         } catch (Exception e) {
             if (ExceptionsHelper.unwrapCause(e) instanceof IndexAlreadyExistsException) {
+            	GetAliasesResponse response = client.admin().indices().getAliases(new GetAliasesRequest(queryIndexAliasName)).actionGet();
+            	indexVersion = Integer.MIN_VALUE;
+            	//Find the index with the latest version
+            	for(ObjectCursor<String> key: response.getAliases().keys()){
+            		String[] split = key.value.split("_");
+            		try {
+            			int version = Integer.parseInt(split[split.length - 1]);
+            			if(version > indexVersion)
+            				indexVersion = version;
+					} catch (NumberFormatException e2) {
+						continue;
+					}
+            	}
+            	
+            	indexName = queryIndexAliasName +"_" +indexVersion;
                 // that's fine
                 logger.debug("Index [{}] already exists, skipping...", indexName);
             } else if (ExceptionsHelper.unwrapCause(e) instanceof ClusterBlockException) {
@@ -487,34 +534,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
         }
 
         if (client.admin().indices().prepareGetMappings(indexName).setTypes(typeName).get().getMappings().isEmpty()) {
-        	String mapping = null;
-	        //If raw is false, we create a customized mapping
-	        if (!raw) {
-                try {
-	                mapping = XContentFactory.jsonBuilder().startObject().startObject(typeName).startObject("properties")
-	                        .startObject("location").field("type", "geo_point").endObject()
-	                        .startObject("language").field("type", "string").field("index", "not_analyzed").endObject()
-	                        .startObject("user").startObject("properties").startObject("screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
-	                        .startObject("mention").startObject("properties").startObject("screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
-	                        .startObject("in_reply").startObject("properties").startObject("user_screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
-	                        .startObject("retweet").startObject("properties").startObject("user_screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
-	                        .endObject().endObject().endObject().string();
-                } catch (Exception e) {
-                    logger.warn("failed to apply default mapping [{}]/[{}], disabling river...", e, indexName, typeName);
-                    return;
-                }
-	        } else {
-	        	//When raw is true, we create a mapping only with location like geo_point
-                try {
-                	mapping = TwitterInfo.ES_MAPPING;
-                } catch(Exception e) {
-                	logger.warn("failed to create geo mapping [{}]/[{}], disabling river...", e, indexName, typeName);
-                    return;
-                }
-	        }
-	        
-	        logger.debug("Applying default mapping for [{}]/[{}]: {}", indexName, typeName, mapping);
-            client.admin().indices().preparePutMapping(indexName).setType(typeName).setSource(mapping).execute().actionGet();
+        	createMapping();
         } else {
             logger.debug("Mapping already exists for [{}]/[{}], skipping...", indexName, typeName);
         }
@@ -528,6 +548,46 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 
             @Override
             public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
+            	IndicesStatsResponse stats = client
+        				.admin()
+        				.indices()
+        				.stats(new IndicesStatsRequest().clear().docs(true)
+        						.indices(indexName)).actionGet();
+        		IndexStats index = stats.getIndex(indexName);
+        		if(index != null) {
+        			long indexSize = index.getPrimaries().getDocs().getCount();
+        			if(indexSize >= maxEachAliasIndexSize){
+        				//remove previous insert alias to insert on new index
+        				client.admin().indices().aliases(new IndicesAliasesRequest().removeAlias(insertIndexAliasName, indexName)).actionGet();
+        				indexVersion++;
+        				indexName = queryIndexAliasName +"_" +indexVersion;
+        				//create new empty index
+        				client.admin().indices().prepareCreate(indexName).execute().actionGet();
+        				//point the query alias to new index
+        				client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(queryIndexAliasName, indexName)).actionGet();
+        				//point the insert alias to new index
+        	            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(insertIndexAliasName, indexName)).actionGet();
+        			}
+        			
+        			if(maxIndexSize > maxIndexSize){
+        				GetAliasesResponse aliases = client.admin().indices().getAliases(new GetAliasesRequest(queryIndexAliasName)).actionGet();
+                    	long minVersion = Integer.MAX_VALUE;
+                    	//Find the oldest index to remove
+                    	for(ObjectCursor<String> key: aliases.getAliases().keys()){
+                    		String[] split = key.value.split("_");
+                    		try {
+                    			int version = Integer.parseInt(split[split.length - 1]);
+                    			if(version < minVersion)
+                    				minVersion = version;
+        					} catch (NumberFormatException e2) {
+        						continue;
+        					}
+                    	}
+                    	String indexToDelete = queryIndexAliasName +"_" +minVersion;
+                    	client.admin().indices().delete(new DeleteIndexRequest(indexToDelete));
+        			}
+        		}
+        		
                 logger.debug("Executed bulk composed of {} actions", request.numberOfActions());
                 if (response.hasFailures()) {
                     logger.warn("There was failures while executing bulk", response.buildFailureMessage());
@@ -556,6 +616,36 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
         startTwitterStream();
     }
 
+    private void createMapping(){
+    	String mapping = null;
+        //If raw is false, we create a customized mapping
+        if (!raw) {
+            try {
+                mapping = XContentFactory.jsonBuilder().startObject().startObject(typeName).startObject("properties")
+                        .startObject("location").field("type", "geo_point").endObject()
+                        .startObject("language").field("type", "string").field("index", "not_analyzed").endObject()
+                        .startObject("user").startObject("properties").startObject("screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
+                        .startObject("mention").startObject("properties").startObject("screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
+                        .startObject("in_reply").startObject("properties").startObject("user_screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
+                        .startObject("retweet").startObject("properties").startObject("user_screen_name").field("type", "string").field("index", "not_analyzed").endObject().endObject().endObject()
+                        .endObject().endObject().endObject().string();
+            } catch (Exception e) {
+                logger.warn("failed to apply default mapping [{}]/[{}], disabling river...", e, indexName, typeName);
+                return;
+            }
+        } else {
+        	//When raw is true, we create a mapping only with location like geo_point
+            try {
+            	mapping = TwitterInfo.ES_MAPPING;
+            } catch(Exception e) {
+            	logger.warn("failed to create geo mapping [{}]/[{}], disabling river...", e, indexName, typeName);
+                return;
+            }
+        }
+        
+        logger.debug("Applying default mapping for [{}]/[{}]: {}", indexName, typeName, mapping);
+        client.admin().indices().preparePutMapping(indexName).setType(typeName).setSource(mapping).execute().actionGet();
+    }
     private void reconnect() {
         if (closed) {
             logger.debug("can not reconnect twitter on a closed river");
