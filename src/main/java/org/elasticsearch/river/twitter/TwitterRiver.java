@@ -542,10 +542,10 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 	            client.admin().indices().prepareCreate(indexName).setSettings(indexSettings).execute().actionGet();
 	            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(insertIndexAliasName, indexName)).actionGet();
 	            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(queryIndexAliasName, indexName)).actionGet();
-	            logger.info("Insert Index Version: [{}]", indexVersion);
+	            logger.info("Create new Index [{}] with version: [{}]", indexName, indexVersion);
         	} else {
         		indexVersion = getMinAndMaxVersion()[1]; //get latest index version
-            	logger.info("Index Version: [{}]", indexVersion);
+            	logger.info("Recovering Index [{}] with version: [{}]", indexName, indexVersion);
             	
             	indexName = queryIndexAliasName +"_" +indexVersion;
             	indexSize = getIndexSize(indexName);
@@ -554,7 +554,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
         } catch (Exception e) {
             if (ExceptionsHelper.unwrapCause(e) instanceof IndexAlreadyExistsException) {
             	indexVersion = getMinAndMaxVersion()[1]; //get latest index version
-            	logger.info("Index Version: [{}]", indexVersion);
+            	logger.info("Index [{}] already exists. Get Index [{}] with version: [{}]", indexName, indexName, indexVersion);
             	
             	indexName = queryIndexAliasName +"_" +indexVersion;
             	indexSize = getIndexSize(indexName);
@@ -571,6 +571,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             }
         }
 
+        logger.info("Twitter data will be inserted on Index [{}] with size of [{}] and total size of [{}]", indexName, indexSize, totalIndexSize);
         if (client.admin().indices().prepareGetMappings(indexName).setTypes(typeName).get().getMappings().isEmpty()) {
         	createMapping();
         } else {
