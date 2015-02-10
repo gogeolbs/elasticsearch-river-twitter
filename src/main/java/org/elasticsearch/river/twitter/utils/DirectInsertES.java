@@ -1,8 +1,7 @@
 package org.elasticsearch.river.twitter.utils;
 
 import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.util.Iterator;
+import java.io.FileReader;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -20,8 +19,6 @@ import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.river.twitter.TwitterInsertBuilder;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 import twitter4j.Status;
 import twitter4j.TwitterObjectFactory;
@@ -35,7 +32,7 @@ public class DirectInsertES {
 
 	@SuppressWarnings("resource")
 	public DirectInsertES(String[] seeds, String layerName,
-			String elasticCluster) throws Exception {
+			String elasticCluster, String filePath) throws Exception {
 
 		TransportAddress[] seedAddresses = new TransportAddress[seeds.length];
 		for(int i =0; i < seeds.length;i++)
@@ -46,7 +43,7 @@ public class DirectInsertES {
 		client = new TransportClient(builder.build())
 				.addTransportAddresses(seedAddresses);
 		
-		BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+		BufferedReader br = new BufferedReader(new FileReader(filePath));
 		System.out.println("Inserting using the stream from System.in");
 		long t = System.currentTimeMillis();
 		long inserted = 0;
@@ -59,24 +56,11 @@ public class DirectInsertES {
 		BulkRequestBuilder bulkRequest = client.prepareBulk();
 		String line = br.readLine();
 		while (line != null) {
-			
-			if(line.equals("[") || line.equals("]")) {
-				line = br.readLine();
-				continue;
-			}
-			
-			//remove the last character if it is comma
-			if(line.endsWith(","))
-				line = line.substring(0, line.length() - 1);
-			
-			
 			XContentBuilder xBuilder = null;
 			String id = null;
 			try {
-				JSONObject json = new JSONObject(line);
-				JSONObject in = new JSONObject(line);
-				parse(in, json);
-				Status status = TwitterObjectFactory.createStatus(json.toString());
+				String json = LowerCaseKeyDeserializer.formatToES(line);
+				Status status = TwitterObjectFactory.createStatus(json);
 				id = Long.toString(status.getId());
 				xBuilder = TwitterInsertBuilder.constructInsertBuilder(status, true, false);
 			}catch (Exception e) {
@@ -124,27 +108,6 @@ public class DirectInsertES {
 		System.exit(0);
 	}
 	
-	@SuppressWarnings("unchecked")
-	private static void parse(JSONObject json, JSONObject out) throws JSONException{
-	    Iterator<String> keys = json.keys();
-	    while(keys.hasNext()){
-	        String key = keys.next();
-	        try{
-	             JSONObject value = json.getJSONObject(key);
-	             parse(value, out.getJSONObject(key));
-	        }catch(Exception e){
-	        	Object object = json.get(key);
-	        	if(object != null && object instanceof String){
-	        		String s = (String) object;
-	        		if(s.isEmpty() || s.contains(";")){
-	        			out.remove(key);
-	        		}
-	        	}
-	        }
-
-	    }
-	}
-
 	public void close() {
 		client.close();
 	}
@@ -183,20 +146,21 @@ public class DirectInsertES {
 
 	public static void main(String[] args) {
 		try {
-			if(args.length != 3) {
-				System.out.println("You should enter the following arguments: [elasticsearch ip] [elasticsearch index name] [elasticsearch cluster name]");
+			if(args.length != 4) {
+				System.out.println("You should enter the following arguments: [elasticsearch ip] [elasticsearch index name] [elasticsearch cluster name] [json file path]");
 				System.exit(0);
 			}
 			//WARN Configurações do welder 
 			String seed = args[0];
 			String layerName = args[1];
 			String elasticCluster = args[2];
+			String filePath = args[3];
 
 			System.out.println("ElasticSearch IP: " + seed);
 			System.out.println("Layer name: " + layerName);
 			System.out.println("Elastic cluster: " + elasticCluster);
 
-			new DirectInsertES(seed.split(";"), layerName, elasticCluster);
+			new DirectInsertES(seed.split(";"), layerName, elasticCluster, filePath);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}

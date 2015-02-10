@@ -20,17 +20,18 @@
 package org.elasticsearch.river.twitter;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
 import org.elasticsearch.ExceptionsHelper;
-import org.elasticsearch.action.ActionFuture;
+import org.elasticsearch.action.WriteConsistencyLevel;
+import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest;
+import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
-import org.elasticsearch.action.admin.indices.alias.exists.AliasesExistResponse;
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesRequest;
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesResponse;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
-import org.elasticsearch.action.admin.indices.get.GetIndexRequest;
 import org.elasticsearch.action.admin.indices.stats.IndexStats;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequest;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
@@ -38,12 +39,16 @@ import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
+import org.elasticsearch.action.support.replication.ReplicationType;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.cluster.block.ClusterBlockException;
+import org.elasticsearch.cluster.metadata.AliasMetaData;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.hppc.cursors.ObjectCursor;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -103,18 +108,23 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 
     private final String queryIndexAliasName;
     private String insertIndexAliasName;
-    private int indexVersion = 1;
     private String indexName;
 
     private final String typeName;
 
     private static final long DEFAULT_MAX_EACH_INDEX_SIZE =  100000000;
     private static final long DEFAULT_MAX_INDEX_SIZE = 10000000000L;
+    private static final int DEFAULT_BULK_SIZE = 1000;
+    private static final int DEFAULT_REFRESH_TIME = 30;
+    private static final int DEFAULT_NUM_SHARDS = 5;
+    private static final int DEFAULT_REPLICATION_FACTOR = 1;
     private final long maxEachAliasIndexSize;
     private final long maxIndexSize;
     private final int bulkSize;
     private final int maxConcurrentBulk;
     private final TimeValue bulkFlushInterval;
+    private final int numShards;
+    private final int replicationFactor;
 
     private final FilterQuery filterQuery;
 
@@ -127,6 +137,10 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 
     private volatile boolean closed = false;
 
+	private int indexVersion = 1;
+	private long indexSize = 0;
+	private long totalIndexSize = 0;
+
     @SuppressWarnings({"unchecked"})
     @Inject
     public TwitterRiver(RiverName riverName, RiverSettings riverSettings, Client client, ThreadPool threadPool, Settings settings) {
@@ -136,7 +150,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 
         String riverStreamType;
         
-        logger.debug("Configuring Twitter River...");
+        logger.info("Configuring Twitter River...");
 
         if (riverSettings.settings().containsKey("twitter")) {
             Map<String, Object> twitterSettings = (Map<String, Object>) riverSettings.settings().get("twitter");
@@ -201,10 +215,12 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                 queryIndexAliasName = indexName;
                 maxEachAliasIndexSize = DEFAULT_MAX_EACH_INDEX_SIZE;
                 maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
+                numShards = DEFAULT_NUM_SHARDS;
+                replicationFactor = DEFAULT_REPLICATION_FACTOR;
                 typeName = "status";
-                bulkSize = 100;
+                bulkSize = DEFAULT_BULK_SIZE;
                 this.maxConcurrentBulk = 1;
-                this.bulkFlushInterval = TimeValue.timeValueSeconds(5);
+                this.bulkFlushInterval = TimeValue.timeValueSeconds(DEFAULT_REFRESH_TIME);
                 logger.warn("no filter defined for type filter. Disabling river...");
                 return;
             }
@@ -311,9 +327,11 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                     maxEachAliasIndexSize = DEFAULT_MAX_EACH_INDEX_SIZE;
                     maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
                     typeName = "status";
-                    bulkSize = 100;
+                    bulkSize = DEFAULT_BULK_SIZE;
+                    numShards = DEFAULT_NUM_SHARDS;
+                    replicationFactor = DEFAULT_REPLICATION_FACTOR;
                     this.maxConcurrentBulk = 1;
-                    this.bulkFlushInterval = TimeValue.timeValueSeconds(5);
+                    this.bulkFlushInterval = TimeValue.timeValueSeconds(DEFAULT_REFRESH_TIME);
                     logger.warn("can not set language filter without tracks, follow, locations or user_lists. Disabling river.");
                     return;
                 }
@@ -357,9 +375,11 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             maxEachAliasIndexSize = DEFAULT_MAX_EACH_INDEX_SIZE;
             maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
             typeName = "status";
-            bulkSize = 100;
+            bulkSize = DEFAULT_BULK_SIZE;
+            numShards = DEFAULT_NUM_SHARDS;
+            replicationFactor = DEFAULT_REPLICATION_FACTOR;
             this.maxConcurrentBulk = 1;
-            this.bulkFlushInterval = TimeValue.timeValueSeconds(5);
+            this.bulkFlushInterval = TimeValue.timeValueSeconds(DEFAULT_REFRESH_TIME);
             logger.warn("no oauth specified, disabling river...");
             return;
         }
@@ -372,16 +392,20 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             typeName = XContentMapValues.nodeStringValue(indexSettings.get("type"), "status");
             this.bulkSize = XContentMapValues.nodeIntegerValue(indexSettings.get("bulk_size"), 100);
             this.bulkFlushInterval = TimeValue.parseTimeValue(XContentMapValues.nodeStringValue(
-                    indexSettings.get("flush_interval"), "5s"), TimeValue.timeValueSeconds(5));
+                    indexSettings.get("flush_interval"), "5s"), TimeValue.timeValueSeconds(DEFAULT_REFRESH_TIME));
             this.maxConcurrentBulk = XContentMapValues.nodeIntegerValue(indexSettings.get("max_concurrent_bulk"), 1);
+            numShards = XContentMapValues.nodeIntegerValue(indexSettings.get("num_shards"), DEFAULT_NUM_SHARDS);
+            replicationFactor = XContentMapValues.nodeIntegerValue(indexSettings.get("replication_factor"), DEFAULT_REPLICATION_FACTOR);
         } else {
             indexName = riverName.name();
             maxEachAliasIndexSize = DEFAULT_MAX_EACH_INDEX_SIZE;
             maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
             typeName = "status";
-            bulkSize = 100;
+            bulkSize = DEFAULT_BULK_SIZE;
+            numShards = DEFAULT_NUM_SHARDS;
+            replicationFactor = DEFAULT_REPLICATION_FACTOR;
             this.maxConcurrentBulk = 1;
-            this.bulkFlushInterval = TimeValue.timeValueSeconds(5);
+            this.bulkFlushInterval = TimeValue.timeValueSeconds(DEFAULT_REFRESH_TIME);
         }
 
         logger.info("creating twitter stream river");
@@ -499,28 +523,42 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
         }
 
         try {
-        	indexName = indexName +"_" +indexVersion;
-            logger.debug("Trying to create index [{}]", indexName);
-            client.admin().indices().prepareCreate(indexName).execute().actionGet();
-            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(insertIndexAliasName, indexName)).actionGet();
-            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(queryIndexAliasName, indexName)).actionGet();
-        } catch (Exception e) {
-            if (ExceptionsHelper.unwrapCause(e) instanceof IndexAlreadyExistsException) {
-            	GetAliasesResponse response = client.admin().indices().getAliases(new GetAliasesRequest(queryIndexAliasName)).actionGet();
-            	indexVersion = Integer.MIN_VALUE;
-            	//Find the index with the latest version
-            	for(ObjectCursor<String> key: response.getAliases().keys()){
-            		String[] split = key.value.split("_");
-            		try {
-            			int version = Integer.parseInt(split[split.length - 1]);
-            			if(version > indexVersion)
-            				indexVersion = version;
-					} catch (NumberFormatException e2) {
-						continue;
-					}
-            	}
+        	//wait for cluster health status yellow
+        	if (client.admin().cluster()
+					.health(new ClusterHealthRequest(queryIndexAliasName)).get()
+					.getStatus().equals(ClusterHealthStatus.RED)) {
+        		logger.info("Wait for cluster health status yellow on index [{}] ...", queryIndexAliasName);
+				client.admin().cluster().prepareHealth(queryIndexAliasName)
+						.setWaitForYellowStatus().get();
+			}
+        	
+        	int[] versions = getMinAndMaxVersion();
+        	if(versions == null) {
+	        	indexName = indexName +"_" +indexVersion ;
+	            logger.debug("Trying to create index [{}]", indexName);
+	            Settings indexSettings = ImmutableSettings.settingsBuilder()
+	    				.put("number_of_shards", numShards)
+	    				.put("number_of_replicas", replicationFactor).build();
+	            client.admin().indices().prepareCreate(indexName).setSettings(indexSettings).execute().actionGet();
+	            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(insertIndexAliasName, indexName)).actionGet();
+	            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(queryIndexAliasName, indexName)).actionGet();
+	            logger.info("Insert Index Version: [{}]", indexVersion);
+        	} else {
+        		indexVersion = getMinAndMaxVersion()[1]; //get latest index version
+            	logger.info("Index Version: [{}]", indexVersion);
             	
             	indexName = queryIndexAliasName +"_" +indexVersion;
+            	indexSize = getIndexSize(indexName);
+            	totalIndexSize = getIndexSize(queryIndexAliasName);
+        	}
+        } catch (Exception e) {
+            if (ExceptionsHelper.unwrapCause(e) instanceof IndexAlreadyExistsException) {
+            	indexVersion = getMinAndMaxVersion()[1]; //get latest index version
+            	logger.info("Index Version: [{}]", indexVersion);
+            	
+            	indexName = queryIndexAliasName +"_" +indexVersion;
+            	indexSize = getIndexSize(indexName);
+            	totalIndexSize = getIndexSize(queryIndexAliasName);
                 // that's fine
                 logger.debug("Index [{}] already exists, skipping...", indexName);
             } else if (ExceptionsHelper.unwrapCause(e) instanceof ClusterBlockException) {
@@ -548,47 +586,11 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 
             @Override
             public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
-            	IndicesStatsResponse stats = client
-        				.admin()
-        				.indices()
-        				.stats(new IndicesStatsRequest().clear().docs(true)
-        						.indices(indexName)).actionGet();
-        		IndexStats index = stats.getIndex(indexName);
-        		if(index != null) {
-        			long indexSize = index.getPrimaries().getDocs().getCount();
-        			if(indexSize >= maxEachAliasIndexSize){
-        				//remove previous insert alias to insert on new index
-        				client.admin().indices().aliases(new IndicesAliasesRequest().removeAlias(insertIndexAliasName, indexName)).actionGet();
-        				indexVersion++;
-        				indexName = queryIndexAliasName +"_" +indexVersion;
-        				//create new empty index
-        				client.admin().indices().prepareCreate(indexName).execute().actionGet();
-        				//point the query alias to new index
-        				client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(queryIndexAliasName, indexName)).actionGet();
-        				//point the insert alias to new index
-        	            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(insertIndexAliasName, indexName)).actionGet();
-        			}
-        			
-        			if(maxIndexSize > maxIndexSize){
-        				GetAliasesResponse aliases = client.admin().indices().getAliases(new GetAliasesRequest(queryIndexAliasName)).actionGet();
-                    	long minVersion = Integer.MAX_VALUE;
-                    	//Find the oldest index to remove
-                    	for(ObjectCursor<String> key: aliases.getAliases().keys()){
-                    		String[] split = key.value.split("_");
-                    		try {
-                    			int version = Integer.parseInt(split[split.length - 1]);
-                    			if(version < minVersion)
-                    				minVersion = version;
-        					} catch (NumberFormatException e2) {
-        						continue;
-        					}
-                    	}
-                    	String indexToDelete = queryIndexAliasName +"_" +minVersion;
-                    	client.admin().indices().delete(new DeleteIndexRequest(indexToDelete));
-        			}
-        		}
+            	indexSize += request.numberOfActions();
+            	totalIndexSize += request.numberOfActions();
+            	verifyIndexSize(); //verify if the size of the index is greater than the allowed
         		
-                logger.debug("Executed bulk composed of {} actions", request.numberOfActions());
+                logger.debug("Executed bulk composed of {} actions", request.numberOfActions() +". Index size: " +indexSize);
                 if (response.hasFailures()) {
                     logger.warn("There was failures while executing bulk", response.buildFailureMessage());
                     if (logger.isDebugEnabled()) {
@@ -614,6 +616,85 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 
         logger.debug("Bulk processor created with bulkSize [{}], bulkFlushInterval [{}]", bulkSize, bulkFlushInterval);
         startTwitterStream();
+    }
+    
+    private long getIndexSize(String indexName){
+    	IndicesStatsResponse stats = client
+				.admin()
+				.indices()
+				.stats(new IndicesStatsRequest().clear().docs(true)
+						.indices(indexName)).actionGet();
+		IndexStats index = stats.getIndex(indexName);
+		if(index != null)
+			return index.getPrimaries().getDocs().getCount();
+		
+		return 0;
+    }
+    
+    private int[] getMinAndMaxVersion(){
+    	int[] versions = new int[2];
+
+    	GetAliasesResponse response = client.admin().indices().getAliases(new GetAliasesRequest(queryIndexAliasName)).actionGet();
+    	int maxVersion = Integer.MIN_VALUE;
+    	int minVersion = Integer.MAX_VALUE;
+    	ImmutableOpenMap<String,List<AliasMetaData>> aliases = response.getAliases();
+    	Iterator<ObjectCursor<String>> it = aliases.keys().iterator();
+    	
+    	if(!it.hasNext())
+    		return null;
+    	
+    	//Find the index with the latest version
+    	while(it.hasNext()) {
+    		String key = it.next().value;
+    		String[] split = key.split("_");
+    		try {
+    			int version = Integer.parseInt(split[split.length - 1]);
+    			if(version > maxVersion)
+    				maxVersion = version;
+    			if(version < minVersion)
+    				minVersion = version;
+			} catch (NumberFormatException e2) {
+				continue;
+			}
+    	}
+    	
+    	versions[0] = minVersion;
+    	versions[1] = maxVersion;
+    	return versions;
+    }
+    
+    private synchronized void verifyIndexSize(){
+		if(indexSize >= maxEachAliasIndexSize){
+			logger.info("A new index will be created: " +indexName);
+			//remove previous insert alias to insert on new index
+			client.admin().indices().aliases(new IndicesAliasesRequest().removeAlias(indexName, insertIndexAliasName)).actionGet();
+			indexVersion++;
+			indexName = queryIndexAliasName +"_" +indexVersion;
+			
+			Settings indexSettings = ImmutableSettings.settingsBuilder()
+					.put("number_of_shards", numShards)
+					.put("number_of_replicas", replicationFactor).build();
+			
+			//create new empty index
+			client.admin().indices().prepareCreate(indexName).setSettings(indexSettings).execute().actionGet();
+			//point the query alias to new index
+			client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(queryIndexAliasName, indexName)).actionGet();
+			//point the insert alias to new index
+            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(insertIndexAliasName, indexName)).actionGet();
+            
+            logger.info("Created a new index " +indexName);
+            
+            //Delete the oldest index if the total size of the indexes is greater than maxIndexSize to control the index size
+    		if(totalIndexSize > maxIndexSize){
+				int minVersion = getMinAndMaxVersion()[0];
+            	String indexToDelete = queryIndexAliasName +"_" +minVersion;
+            	client.admin().indices().delete(new DeleteIndexRequest(indexToDelete));
+            	logger.info("Index " +indexToDelete +" was deleted because the index size limit was exceeded.");
+            	totalIndexSize -= maxEachAliasIndexSize;
+			}
+    		
+    		indexSize = 0;
+		}
     }
 
     private void createMapping(){
@@ -726,7 +807,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                     if (raw) {
                     	XContentBuilder builder = TwitterInsertBuilder.constructInsertBuilder(status, autoGenerateGeoPointFromPlace, geoAsArray);
                     	
-						bulkProcessor.add(Requests.indexRequest(indexName).type(typeName).id(Long.toString(status.getId())).source(builder));
+						bulkProcessor.add(Requests.indexRequest(indexName).consistencyLevel(WriteConsistencyLevel.ONE).replicationType(ReplicationType.ASYNC).type(typeName).id(Long.toString(status.getId())).source(builder));
                         
                     } else {
                         XContentBuilder builder = XContentFactory.jsonBuilder().startObject();
@@ -872,7 +953,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 
         @Override
         public void onTrackLimitationNotice(int numberOfLimitedStatuses) {
-            logger.info("received track limitation notice, number_of_limited_statuses {}", numberOfLimitedStatuses);
+            logger.debug("received track limitation notice, number_of_limited_statuses {}", numberOfLimitedStatuses);
         }
 
         @Override
