@@ -23,16 +23,17 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.WriteConsistencyLevel;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
+import org.elasticsearch.action.admin.indices.alias.exists.AliasesExistResponse;
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesRequest;
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesResponse;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
-import org.elasticsearch.action.admin.indices.stats.IndexStats;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequest;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
 import org.elasticsearch.action.bulk.BulkItemResponse;
@@ -523,13 +524,13 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
         }
 
         try {
-        	//wait for cluster health status yellow
+        	//wait for cluster health status yellow until 2 minutes
         	if (client.admin().cluster()
 					.health(new ClusterHealthRequest(queryIndexAliasName)).get()
 					.getStatus().equals(ClusterHealthStatus.RED)) {
-        		logger.info("Wait for cluster health status yellow on index [{}] ...", queryIndexAliasName);
+        		logger.info("Waiting for cluster health status yellow on index [{}] ...", queryIndexAliasName);
 				client.admin().cluster().prepareHealth(queryIndexAliasName)
-						.setWaitForYellowStatus().get();
+						.setWaitForYellowStatus().setTimeout(TimeValue.timeValueMinutes(2)).get();
 			}
         	
         	int[] versions = getMinAndMaxVersion();
@@ -550,6 +551,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             	indexName = queryIndexAliasName +"_" +indexVersion;
             	indexSize = getIndexSize(indexName);
             	totalIndexSize = getIndexSize(queryIndexAliasName);
+            	verifyAlias();
         	}
         } catch (Exception e) {
             if (ExceptionsHelper.unwrapCause(e) instanceof IndexAlreadyExistsException) {
@@ -559,6 +561,8 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
             	indexName = queryIndexAliasName +"_" +indexVersion;
             	indexSize = getIndexSize(indexName);
             	totalIndexSize = getIndexSize(queryIndexAliasName);
+            	verifyAlias();
+            	 
                 // that's fine
                 logger.debug("Index [{}] already exists, skipping...", indexName);
             } else if (ExceptionsHelper.unwrapCause(e) instanceof ClusterBlockException) {
@@ -619,17 +623,24 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
         startTwitterStream();
     }
     
+    private void verifyAlias(){
+    	try {
+			AliasesExistResponse response = client.admin().indices().aliasesExist(new GetAliasesRequest(insertIndexAliasName).indices(indexName)).get();
+			if(!response.exists())
+				client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(insertIndexAliasName, indexName)).actionGet();
+		} catch (InterruptedException e) {
+			logger.error(e.getMessage(), e);
+		} catch (ExecutionException e) {
+			logger.error(e.getMessage(), e);
+		}
+    }
     private long getIndexSize(String indexName){
     	IndicesStatsResponse stats = client
 				.admin()
 				.indices()
 				.stats(new IndicesStatsRequest().clear().docs(true)
 						.indices(indexName)).actionGet();
-		IndexStats index = stats.getIndex(indexName);
-		if(index != null)
-			return index.getPrimaries().getDocs().getCount();
-		
-		return 0;
+    	return stats.getPrimaries().getDocs().getCount();
     }
     
     private int[] getMinAndMaxVersion(){
@@ -808,7 +819,7 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                     if (raw) {
                     	XContentBuilder builder = TwitterInsertBuilder.constructInsertBuilder(status, autoGenerateGeoPointFromPlace, geoAsArray);
                     	
-						bulkProcessor.add(Requests.indexRequest(indexName).consistencyLevel(WriteConsistencyLevel.ONE).replicationType(ReplicationType.ASYNC).type(typeName).id(Long.toString(status.getId())).source(builder));
+						bulkProcessor.add(Requests.indexRequest(insertIndexAliasName).consistencyLevel(WriteConsistencyLevel.ONE).replicationType(ReplicationType.ASYNC).type(typeName).id(Long.toString(status.getId())).source(builder));
                         
                     } else {
                         XContentBuilder builder = XContentFactory.jsonBuilder().startObject();
