@@ -1,4 +1,4 @@
-package org.elasticsearch.river.twitter.utils;
+package org.elasticsearch.river.twitter;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
@@ -18,7 +18,8 @@ import org.elasticsearch.common.settings.ImmutableSettings.Builder;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.river.twitter.TwitterInsertBuilder;
+import org.elasticsearch.river.twitter.utils.LowerCaseKeyDeserializer;
+import org.elasticsearch.river.twitter.utils.TwitterInsertBuilder;
 
 import twitter4j.Status;
 import twitter4j.TwitterObjectFactory;

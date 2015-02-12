@@ -60,6 +60,8 @@ import org.elasticsearch.river.AbstractRiverComponent;
 import org.elasticsearch.river.River;
 import org.elasticsearch.river.RiverName;
 import org.elasticsearch.river.RiverSettings;
+import org.elasticsearch.river.twitter.utils.TwitterInfo;
+import org.elasticsearch.river.twitter.utils.TwitterInsertBuilder;
 import org.elasticsearch.threadpool.ThreadPool;
 
 import twitter4j.FilterQuery;

@@ -1,4 +1,4 @@
-package org.elasticsearch.river.twitter;
+package org.elasticsearch.river.twitter.utils;
 
 import java.io.IOException;
 
@@ -310,8 +310,10 @@ public class TwitterInsertBuilder {
  			double maxy = geoLocations[1].getLatitude();
  			double maxx = geoLocations[2].getLongitude();
  			
- 			double x = minx + Math.random() * (maxx - minx);
- 			double y = miny + Math.random() * (maxy - miny);
+// 			double x = minx + Math.random() * (maxx - minx);
+// 			double y = miny + Math.random() * (maxy - miny);
+ 			double x = (maxx - minx) / 2;
+ 			double y = (maxy - miny) / 2;
  			return y +"," + x;
  		}
  		return null;
