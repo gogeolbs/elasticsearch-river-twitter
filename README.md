@@ -300,6 +300,35 @@ mvn -Dtests.twitter=true -Dtests.config=/path/to/config/file/elasticsearch.yml c
 Note that if you want to test User Stream, you need to define write rights for your twitter 
 application.
 
+Build
+=====
+
+Docker
+-----
+
+To build the JARs files, execute the following command:
+
+```
+docker run -it --rm -v "$PWD":/usr/src/mymaven -w /usr/src/mymaven maven:3.2-jdk-7 mvn clean install
+```
+
+If you have a local folder with maven dependencies:
+
+```
+docker run -it --rm -v "$PWD":/usr/src/mymaven -v /home/YOUR_HOME_FOLDER/.m2:/root/.m2 -w /usr/src/mymaven maven:3.2-jdk-7 mvn clean install
+```
+
+Note: The target folder will be created with root.
+
+Maven
+-----
+
+If you already have maven installed and configured.
+
+```
+mvn clean install
+```
+
 License
 -------
 
