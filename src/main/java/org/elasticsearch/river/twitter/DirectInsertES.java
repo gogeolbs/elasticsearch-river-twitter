@@ -11,20 +11,23 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 import org.elasticsearch.action.WriteConsistencyLevel;
-import org.elasticsearch.action.bulk.BulkRequestBuilder;
+import org.elasticsearch.action.bulk.BulkProcessor;
+import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
-import org.elasticsearch.action.index.IndexRequestBuilder;
+import org.elasticsearch.action.support.replication.ReplicationType;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.client.Requests;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.ImmutableSettings.Builder;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
+import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.river.twitter.utils.LowerCaseKeyDeserializer;
 import org.elasticsearch.river.twitter.utils.TwitterInsertBuilder;
@@ -44,13 +47,59 @@ public class DirectInsertES {
 	public static int WGS84_srid = 4326;
 
 	private Client client;
+	private TwitterElasticSearchIndexing elasticIndexing;
+	private BulkProcessor bulkProcessor;
+	
+	
+	private static final long DEFAULT_MAX_EACH_INDEX_SIZE = 100000000;
+	private static final long DEFAULT_MAX_INDEX_SIZE = 10000000000L;
+	private static final int DEFAULT_NUM_SHARDS = 5;
+	private static final int DEFAULT_REPLICATION_FACTOR = 1;
+	
+	private static final int BULK_SIZE = 1500;
+	private static final int MAX_CONCURRENT_BULK = 4;
+	private static final int FLUSH_TIME_SECONDS = 10;
+	
+	private int inserted = 0;
+	private int numErrors = 0;
 	
 	@SuppressWarnings("resource")
-	public DirectInsertES(String seed, String elasticCluster) throws Exception {
+	public DirectInsertES(String seed, String elasticCluster, String indexName, long maxEachAliasIndexSize, long maxIndexSize, int numShards, int replicationFactor) throws Exception {
 		Builder builder = ImmutableSettings.settingsBuilder().put(
 				"cluster.name", elasticCluster);
 		client = new TransportClient(builder.build())
 				.addTransportAddresses(new InetSocketTransportAddress(seed, 9300));
+		
+		String insertIndexAliasName = indexName +"_index";
+        String queryIndexAliasName = indexName;
+        
+		elasticIndexing = new TwitterElasticSearchIndexing(client, queryIndexAliasName, insertIndexAliasName, indexName, ATTR, maxEachAliasIndexSize, maxIndexSize, numShards, replicationFactor);
+		
+		// Creating bulk processor
+		bulkProcessor = BulkProcessor
+				.builder(client, new BulkProcessor.Listener() {
+					@Override
+					public void beforeBulk(long executionId, BulkRequest request) {
+					}
+
+					@Override
+					public void afterBulk(long executionId,
+							BulkRequest request, BulkResponse response) {
+						inserted += request.numberOfActions();
+						if(inserted > 1000000)
+							System.out.println("Inserting... " + inserted + "  - Errors: "
+									+ numErrors);
+					}
+
+					@Override
+					public void afterBulk(long executionId,
+							BulkRequest request, Throwable failure) {
+						numErrors += request.numberOfActions();
+					}
+				}).setBulkActions(BULK_SIZE)
+				.setConcurrentRequests(MAX_CONCURRENT_BULK)
+				.setFlushInterval(TimeValue.timeValueSeconds(FLUSH_TIME_SECONDS))
+				.build();
 	}
 	
 	public static void main(String[] args) {
@@ -74,14 +123,19 @@ public class DirectInsertES {
 			
 			System.out.println("ElasticSearch IP: " + seed +". Elastic cluster: " + elasticCluster);
 			
-			DirectInsertES insertES = new DirectInsertES(seed, elasticCluster);
-			
 			String layerName = properties.getProperty("layer_name", null);
 			
 			if(layerName == null){
 				System.err.println("Set the layer name name on properties file " +propertiesFile);
 				System.exit(0);
 			}
+
+			long maxEachAliasIndexSize = Long.parseLong(properties.getProperty("max_each_alias_index_size", String.valueOf(DEFAULT_MAX_EACH_INDEX_SIZE)));
+			long maxIndexSize = Long.parseLong(properties.getProperty("max_index_size", String.valueOf(DEFAULT_MAX_INDEX_SIZE)));
+			int numShards = Integer.parseInt(properties.getProperty("num_shards", String.valueOf(DEFAULT_NUM_SHARDS)));
+			int replicationFactor = Integer.parseInt(properties.getProperty("replication_factor", String.valueOf(DEFAULT_REPLICATION_FACTOR)));
+			
+			DirectInsertES insertES = new DirectInsertES(seed, elasticCluster, layerName, maxEachAliasIndexSize, maxIndexSize, numShards, replicationFactor);
 			
 			boolean twitter4jFormat = Boolean.parseBoolean(properties.getProperty("files_twitter4j_format", "false"));
 			
@@ -102,20 +156,21 @@ public class DirectInsertES {
 				//Download each file and insert
 				for(StoredObject object: validObjects) {
 					String name = object.getName();
-					object.downloadObject(new File(name));
+					File file = new File(name);
+					object.downloadObject(file);
+					Process p = Runtime.getRuntime().exec(
+							"tar xfvz " + file.getName());
+					p.waitFor();
+					if(name.endsWith(".tar.bz2"))
+						name = name.replace(".tar.bz2", "");
 					pool.execute(new ESInsert(insertES, name, layerName, twitter4jFormat));
 				}
 			}
 			
 			//User can insert a local file too
 			String filePath = properties.getProperty("file_path");
-			
-			if(filePath == null) {
-				System.err.println("No remote object storage neither local File Path was setted on properties file " +propertiesFile);
-				System.exit(0);
-			}
-			
-			insertES.insertFile(filePath, layerName, twitter4jFormat);
+			if(filePath != null) 
+				insertES.insertFile(filePath, layerName, twitter4jFormat);
 			
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -164,17 +219,17 @@ public class DirectInsertES {
 		return validObjects;
 	}
 	
-	private void insertFile(String filePath, String layerName, boolean twitter4jFormat) throws IOException, InterruptedException{
+	private void insertFile(String filePath, String layerName, boolean twitter4jFormat) throws IOException, InterruptedException, ExecutionException{
+		System.out.println("Inserting file: " +filePath +" in layer " +layerName);
+		//initialize the ES index if it doesn't exist
+		elasticIndexing.initializeSlaveIndexControl();
+		
 		BufferedReader br = new BufferedReader(new FileReader(filePath));
 		long t = System.currentTimeMillis();
-		long inserted = 0;
-		int sizeBulk = 0;
-		long numErrors = 0;
 		ThreadPoolExecutor pool = new ThreadPoolExecutor(4, 4, 0,
 				TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
 
 		long lineWithErrorsOnFile = 0;
-		BulkRequestBuilder bulkRequest = client.prepareBulk();
 		String line = br.readLine();
 		while (line != null) {
 			XContentBuilder xBuilder = null;
@@ -193,32 +248,14 @@ public class DirectInsertES {
 				continue;
 			}
 			
-			IndexRequestBuilder insert = client.prepareIndex(layerName, ATTR)
-					.setSource(xBuilder).setRefresh(false).setId(id)
-					.setConsistencyLevel(WriteConsistencyLevel.ONE);
-
-			bulkRequest.add(insert);
-			sizeBulk++;
-
+			bulkProcessor.add(Requests
+					.indexRequest(layerName)
+					.consistencyLevel(WriteConsistencyLevel.ONE)
+					.replicationType(ReplicationType.ASYNC)
+					.type(ATTR).id(id)
+					.source(xBuilder));
+			
 			line = br.readLine();
-			if (sizeBulk > 1500 || line == null || line.equals("]")) {
-				while(true) {
-					try {
-						pool.execute(new BulkInsert(bulkRequest));
-						break;
-					}catch(RejectedExecutionException e){
-						continue;
-					}
-				}
-				bulkRequest = client.prepareBulk();
-				sizeBulk = 0;
-			}
-
-			inserted++;
-			if (inserted % 1000000 == 0 || line == null) {
-				System.out.println("Inserting... " + inserted + "  - Errors: "
-						+ numErrors);
-			}
 
 		}
 		
@@ -237,38 +274,6 @@ public class DirectInsertES {
 		client.close();
 	}
 
-	private static class BulkInsert implements Runnable {
-		BulkRequestBuilder bulkRequest;
-		
-		public BulkInsert(BulkRequestBuilder bulkRequest) {
-			super();
-			this.bulkRequest = bulkRequest;
-		}
-
-		@Override
-		public void run() {
-			BulkResponse bulkResponse = null;
-			while (true) {
-				try {
-					bulkResponse = bulkRequest.execute().actionGet();
-					break;
-				} catch (Exception e) {
-					try {
-						Thread.sleep(1000);
-					} catch (InterruptedException e1) {
-						e1.printStackTrace();
-					}
-					System.out.println("timed out after [5001ms].\n"
-							+ e.getMessage());
-				}
-			}
-			if (bulkResponse.hasFailures()) {
-				System.out.println("ERROR ON BULK");
-			}
-			bulkResponse = null;
-		}
-	}
-	
 	private static class ESInsert implements Runnable {
 		private DirectInsertES insertES;
 		private String filePath;
@@ -288,6 +293,8 @@ public class DirectInsertES {
 			try {
 				insertES.insertFile(filePath, layerName, twitter4jFormat);
 			} catch (IOException | InterruptedException e) {
+				e.printStackTrace();
+			} catch (ExecutionException e) {
 				e.printStackTrace();
 			}
 		}
