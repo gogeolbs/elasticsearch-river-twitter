@@ -150,13 +150,9 @@ public class FileStatusHandler extends StatusAdapter {
 
 				// Listando os dados do container
 				Container container = account.getContainer(containerName);
-				for (StoredObject item : container.list()) {
-					System.out.println(item.getPublicURL());
-				}
 
 				filePath = filePath + ".tar.bz2";
 				StoredObject object = container.getObject(filePath);
-
 				
 				object.uploadObject(new File(filePath));
 			} catch (IOException e) {

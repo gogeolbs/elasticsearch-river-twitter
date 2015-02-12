@@ -117,27 +117,36 @@ public class TwitterCollector {
 
 	@SuppressWarnings({ "unchecked", "resource" })
 	public static void main(String[] args) throws IOException {
-		if (args.length != 4) {
+		if (args.length != 4 && args.length != 1) {
 			System.out
-					.println("You should enter the following arguments: [elasticsearch ip] [elasticsearch index name] [elasticsearch cluster name] [properties file path]");
+					.println("You should enter the following arguments: [elasticsearch ip] [elasticsearch index name] [elasticsearch cluster name] [properties file path] when you want index on ES");
+			System.out
+			.println("You should enter the following arguments: [properties file path] when you want to write the tweets json in a file.");
 			System.exit(0);
 		}
-		// WARN Configurações do welder
-		String seed = args[0];
-		String layerName = args[1];
-		String elasticCluster = args[2];
-		String filePath = args[3];
-
-		System.out.println("ElasticSearch IP: " + seed);
-		System.out.println("Layer name: " + layerName);
-		System.out.println("Elastic cluster: " + elasticCluster);
-
-		Builder builder = ImmutableSettings.settingsBuilder().put(
-				"cluster.name", elasticCluster);
-		Client client = new TransportClient(builder.build())
-				.addTransportAddresses(new InetSocketTransportAddress(seed,
-						9300));
 		
+		String filePath = null;
+		Client client = null;
+		
+		if(args.length == 4) {
+			
+			// WARN Configurações do welder
+			String seed = args[0];
+			String layerName = args[1];
+			String elasticCluster = args[2];
+			filePath = args[3];
+			Builder builder = ImmutableSettings.settingsBuilder().put(
+					"cluster.name", elasticCluster);
+			client = new TransportClient(builder.build())
+					.addTransportAddresses(new InetSocketTransportAddress(seed,
+							9300));
+			
+			System.out.println("ElasticSearch IP: " + seed);
+			System.out.println("Layer name: " + layerName);
+			System.out.println("Elastic cluster: " + elasticCluster);
+		} else
+			filePath = args[0];
+
 		BufferedReader br = new BufferedReader(new FileReader(filePath));
 
 		String json = "";
@@ -148,15 +157,13 @@ public class TwitterCollector {
 
 		br.close();
 		ObjectMapper mapper = new ObjectMapper();
-		SimpleModule module = new SimpleModule("LowerCaseKeyDeserializer",
+		SimpleModule module = new SimpleModule("PropertiesSerializer",
 				new Version(1, 0, 0, null));
 		mapper.registerModule(module);
 		Map<String, Object> settings = (Map<String, Object>) mapper.readValue(
 				json, Map.class);
 
 		RiverSettings riverSettings = new RiverSettings(null, settings);
-
-		
 
 		TwitterCollector twitter = new TwitterCollector(riverSettings, client);
 		twitter.start();
