@@ -11,3 +11,4 @@
 .local-execution-hints.log
 /plugin_tools
 
+/insert_es.properties
