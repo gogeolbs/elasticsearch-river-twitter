@@ -171,6 +171,24 @@
 							<goal>single</goal>
 						</goals>
 					</execution>
+					<execution>
+						<id>direct-insert</id>
+						<phase>package</phase>
+						<goals>
+							<goal>single</goal>
+						</goals>
+						<configuration>
+							<finalName>direct-insert</finalName>
+							<archive>
+								<manifest>
+									<mainClass>org.elasticsearch.river.twitter.DirectInsertES</mainClass>
+								</manifest>
+							</archive>
+							<descriptorRefs>
+								<descriptorRef>jar-with-dependencies</descriptorRef>
+							</descriptorRefs>
+						</configuration>
+					</execution>
 				</executions>
 			</plugin>
 			<plugin>
