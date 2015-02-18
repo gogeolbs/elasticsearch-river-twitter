@@ -54,14 +54,6 @@ public class StatusHandler extends StatusAdapter {
 	}
 	
 	@Override
-	public StatusHandler clone() throws CloneNotSupportedException {
-		return new StatusHandler(writeTweetsOnFile, collectOnlyGeoTweets,
-				autoGenerateGeoPointFromPlace, ignoreRetweet, geoAsArray,
-				insertIndexAliasName, typeName, bulkProcessor, indexName,
-				conn, numTweetsCollected, numTweetsNotCollected);
-	}
-
-	@Override
 	public void onStatus(Status status) {
 		try {
 			/*

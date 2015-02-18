@@ -65,12 +65,6 @@ public class FileStatusHandler extends StatusAdapter {
 	}
 	
 	@Override
-	public FileStatusHandler clone() throws CloneNotSupportedException {
-		return new FileStatusHandler(bw, maxNumTweetsEachFile, outFilePath,
-				numTweetsInFile, boundRegion, conn, numTweetsCollected, numTweetsNotCollected, url, username, password, containerName);
-	}
-
-	@Override
 	public void onStatus(Status status) {
 		try {
 			numTweetsCollected.incrementAndGet();

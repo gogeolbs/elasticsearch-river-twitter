@@ -2,8 +2,6 @@ package org.elasticsearch.river.twitter.connection;
 
 import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.common.unit.TimeValue;
-import org.elasticsearch.river.twitter.handlers.FileStatusHandler;
-import org.elasticsearch.river.twitter.handlers.StatusHandler;
 import org.elasticsearch.river.twitter.handlers.UserStreamHandler;
 import org.elasticsearch.threadpool.ThreadPool;
 
@@ -125,18 +123,7 @@ public class TwitterConnectionControl {
 		}
 
 		try {
-			StatusAdapter status = null;
-			if(statusHandler instanceof FileStatusHandler){
-				FileStatusHandler handler = (FileStatusHandler) statusHandler;
-				status = handler.clone();
-			}
-			
-			if(statusHandler instanceof StatusHandler) {
-				StatusHandler handler = (StatusHandler) statusHandler;
-				status = handler.clone();
-			}
-			
-			startTwitterStream(status, this.filterQuery);
+			startTwitterStream(statusHandler, this.filterQuery);
 		} catch (Exception e) {
 			if (closed) {
 				close();
