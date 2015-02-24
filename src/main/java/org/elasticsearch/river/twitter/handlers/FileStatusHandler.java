@@ -128,11 +128,14 @@ public class FileStatusHandler extends StatusAdapter {
 		public void run() {
 			try {
 				Process p = Runtime.getRuntime().exec(
-						"tar cfvz " + filePath + ".tar.bz2 " + filePath);
+						"tar cfvj " + filePath + ".tar.bz2 " + filePath);
 				p.waitFor();
 
 				if(url == null || username == null || password == null || containerName == null)
 					return;
+				
+				//delete the file with tweets
+				new File(filePath).delete();
 				
 				AccountConfig config = new AccountConfig();
 				config.setUsername(username);
@@ -148,7 +151,11 @@ public class FileStatusHandler extends StatusAdapter {
 				filePath = filePath + ".tar.bz2";
 				StoredObject object = container.getObject(filePath);
 				
-				object.uploadObject(new File(filePath));
+				File file = new File(filePath);
+				object.uploadObject(file);
+				
+				//delete the compacted file.
+				file.delete();
 			} catch (IOException e) {
 				e.printStackTrace();
 			} catch (InterruptedException e) {

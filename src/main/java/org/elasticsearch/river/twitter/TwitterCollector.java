@@ -6,6 +6,7 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Date;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -103,6 +104,10 @@ public class TwitterCollector {
 			.println("You should enter the following arguments: [properties file path] when you want to write the tweets json in a file.");
 			System.exit(0);
 		}
+		
+		System.out.println("Default Locale  : " + Locale.getDefault());
+
+		System.out.println("File Enconding  : " + System.getProperty("file.encoding"));
 		
 		String filePath = null;
 		Client client = null;

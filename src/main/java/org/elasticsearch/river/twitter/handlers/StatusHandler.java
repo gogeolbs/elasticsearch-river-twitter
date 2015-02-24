@@ -78,6 +78,9 @@ public class StatusHandler extends StatusAdapter {
 						.constructInsertBuilder(status,
 								autoGenerateGeoPointFromPlace, geoAsArray);
 
+				if(builder == null)
+					return;
+				
 				bulkProcessor.add(Requests
 						.indexRequest(insertIndexAliasName)
 						.consistencyLevel(WriteConsistencyLevel.ONE)

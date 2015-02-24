@@ -27,6 +27,9 @@ public class TwitterInsertBuilder {
         if(location == null && status.getPlace() != null && autoGenerateGeoPointFromPlace)
         	location = generateGeoPointFromPlace(status);
         
+        if(location == null)
+        	return null;
+        
         XContentBuilder builder = XContentFactory.jsonBuilder().startObject();
         
         //root informations
@@ -109,9 +112,11 @@ public class TwitterInsertBuilder {
             builder.field("street_address", status.getPlace().getStreetAddress());
             builder.endObject();
             
-            builder.startObject("bounding_box");
-            getEnvelopeFromPlace(status.getPlace().getBoundingBoxCoordinates(), builder);
-            builder.endObject();
+            if(status.getPlace().getBoundingBoxCoordinates() != null && status.getPlace().getBoundingBoxCoordinates().length > 0) {
+	            builder.startObject("bounding_box");
+	            getEnvelopeFromPlace(status.getPlace().getBoundingBoxCoordinates(), builder);
+	            builder.endObject();
+            }
             
             builder.endObject();
         }
@@ -312,8 +317,12 @@ public class TwitterInsertBuilder {
  			
 // 			double x = minx + Math.random() * (maxx - minx);
 // 			double y = miny + Math.random() * (maxy - miny);
- 			double x = (maxx - minx) / 2;
- 			double y = (maxy - miny) / 2;
+ 			double x_add = (maxx - minx) / 2;
+ 			double x = minx + x_add;
+ 			double y_add = (maxy - miny) / 2;
+ 			double y = miny + y_add;
+ 			if(y == 0 && x == 0)
+ 				return null;
  			return y +"," + x;
  		}
  		return null;

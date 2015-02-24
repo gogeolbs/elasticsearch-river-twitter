@@ -821,6 +821,9 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
                     if (raw) {
                     	XContentBuilder builder = TwitterInsertBuilder.constructInsertBuilder(status, autoGenerateGeoPointFromPlace, geoAsArray);
                     	
+                    	if(builder == null)
+                    		return;
+                    	
 						bulkProcessor.add(Requests.indexRequest(insertIndexAliasName).consistencyLevel(WriteConsistencyLevel.ONE).replicationType(ReplicationType.ASYNC).type(typeName).id(Long.toString(status.getId())).source(builder));
                         
                     } else {

@@ -10,22 +10,25 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import org.elasticsearch.action.WriteConsistencyLevel;
+import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest;
+import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.index.IndexRequestBuilder;
+import org.elasticsearch.action.support.replication.ReplicationType;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.client.transport.NoNodeAvailableException;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.ImmutableSettings.Builder;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
+import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.river.twitter.utils.LowerCaseKeyDeserializer;
 import org.elasticsearch.river.twitter.utils.TwitterInsertBuilder;
@@ -44,19 +47,24 @@ public class DirectInsertES {
 
 	public static int WGS84_srid = 4326;
 
-	private Client client;
-	private TwitterElasticSearchIndexing elasticIndexing;
+	private static Client client;
+	private static TwitterElasticSearchIndexing elasticIndexing;
 	private static final long DEFAULT_MAX_EACH_INDEX_SIZE = 100000000;
 	private static final long DEFAULT_MAX_INDEX_SIZE = 10000000000L;
 	private static final int DEFAULT_NUM_SHARDS = 5;
 	private static final int DEFAULT_REPLICATION_FACTOR = 1;
+	private static final int BULK_SIZE = 1500;
 	
 	@SuppressWarnings("resource")
-	public DirectInsertES(String seed, String elasticCluster, String indexName, long maxEachAliasIndexSize, long maxIndexSize, int numShards, int replicationFactor) throws Exception {
+	public DirectInsertES(String[] seeds, String elasticCluster, String indexName, long maxEachAliasIndexSize, long maxIndexSize, int numShards, int replicationFactor) throws Exception {
+		TransportAddress[] transportAddresses = new InetSocketTransportAddress[seeds.length];
+		for(int i = 0; i < seeds.length; i++)
+			transportAddresses[i] = new InetSocketTransportAddress(seeds[i], 9300);
+		
 		Builder builder = ImmutableSettings.settingsBuilder().put(
 				"cluster.name", elasticCluster);
 		client = new TransportClient(builder.build())
-				.addTransportAddresses(new InetSocketTransportAddress(seed, 9300));
+				.addTransportAddresses(transportAddresses);
 		
 		String insertIndexAliasName = indexName +"_index";
         String queryIndexAliasName = indexName;
@@ -72,20 +80,25 @@ public class DirectInsertES {
 				System.exit(0);
 			}
 			
+			System.out.println("Default Locale  : " + Locale.getDefault());
+
+			System.out.println("File Enconding  : " + System.getProperty("file.encoding"));
+			
 			String propertiesFile = args[0]; 
 			Properties properties = new Properties();
 			properties.load(new FileReader(propertiesFile));
 			
-			String seed =  properties.getProperty("seed", null);
+			String seedList=  properties.getProperty("seed", null);
 			String elasticCluster = properties.getProperty("elastic_cluster", null);
 			
-			if(seed == null || elasticCluster == null){
+			if(seedList == null || elasticCluster == null){
 				System.err.println("Set the ElasticSearch seed and cluster name on properties file " +propertiesFile);
 				System.exit(0);
 			}
 			
-			System.out.println("ElasticSearch IP: " + seed +". Elastic cluster: " + elasticCluster);
-			
+			System.out.println("ElasticSearch IPs: " + seedList +". Elastic cluster: " + elasticCluster);
+
+			String[] seeds = seedList.split(",");
 			String layerName = properties.getProperty("layer_name", null);
 			
 			if(layerName == null){
@@ -98,9 +111,12 @@ public class DirectInsertES {
 			int numShards = Integer.parseInt(properties.getProperty("num_shards", String.valueOf(DEFAULT_NUM_SHARDS)));
 			int replicationFactor = Integer.parseInt(properties.getProperty("replication_factor", String.valueOf(DEFAULT_REPLICATION_FACTOR)));
 			
-			DirectInsertES insertES = new DirectInsertES(seed, elasticCluster, layerName, maxEachAliasIndexSize, maxIndexSize, numShards, replicationFactor);
+			DirectInsertES insertES = new DirectInsertES(seeds, elasticCluster, layerName, maxEachAliasIndexSize, maxIndexSize, numShards, replicationFactor);
 			
 			boolean twitter4jFormat = Boolean.parseBoolean(properties.getProperty("files_twitter4j_format", "false"));
+			
+			//initialize the ES index if it 
+			elasticIndexing.initializeSlaveIndexControl();
 			
 			//User can insert a local file too
 			String filePath = properties.getProperty("file_path");
@@ -126,17 +142,30 @@ public class DirectInsertES {
 					System.out.println("Downloading file " +name +" ...");
 					object.downloadObject(file);
 					System.out.println("Downloading file " +name +" FINISHED");
+					System.out.println("Decompressing file " +name +" ...");
 					Process p = Runtime.getRuntime().exec(
 							"tar -jxvf " + file.getName());
 					p.waitFor();
+					System.out.println("File " +name +" DECOMPRESSED");
+					//delete compacted file
+					file.delete();
 					if(name.endsWith(".tar.bz2"))
 						name = name.replace(".tar.bz2", "");
-					name = "data/" +name +".json";
+					
+					//Some files are enclosed in data directory
+					if(!new File(name).exists())
+						name = "data/" +name +".json";
+					
 					System.out.println("Inserting file " +name +" ...");
 					insertES.insertFile(name, layerName, twitter4jFormat);
+					//delete json file
+					new File(name).delete();
 					System.out.println("Insert file " +name +" FINISHED");
 				}
 			}
+			
+			client.close();
+			System.exit(0);
 			
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -175,7 +204,7 @@ public class DirectInsertES {
 			}
 			
 			if(fileNameContains != null) {
-				if(!object.getName().contains(fileNameContains))
+				if(!object.getName().contains(fileNameContains) && !object.getName().matches(fileNameContains))
 					continue;
 			}
 			
@@ -186,16 +215,11 @@ public class DirectInsertES {
 	}
 	
 	private void insertFile(String filePath, String layerName, boolean twitter4jFormat) throws IOException, InterruptedException, ExecutionException{
-		//initialize the ES index if it 
-		elasticIndexing.initializeSlaveIndexControl();
-		
 		BufferedReader br = new BufferedReader(new FileReader(filePath));
 		long t = System.currentTimeMillis();
 		long inserted = 0;
 		int sizeBulk = 0;
 		long numErrors = 0;
-		ThreadPoolExecutor pool = new ThreadPoolExecutor(4, 4, 0,
-				TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
 
 		long lineWithErrorsOnFile = 0;
 		BulkRequestBuilder bulkRequest = client.prepareBulk();
@@ -211,6 +235,9 @@ public class DirectInsertES {
 				Status status = TwitterObjectFactory.createStatus(line);
 				id = Long.toString(status.getId());
 				xBuilder = TwitterInsertBuilder.constructInsertBuilder(status, true, false);
+				
+				if(xBuilder == null)
+					continue;
 			}catch (Exception e) {
 				lineWithErrorsOnFile++;
 				line = br.readLine();
@@ -219,16 +246,16 @@ public class DirectInsertES {
 			
 			IndexRequestBuilder insert = client.prepareIndex(layerName, ATTR)
 					.setSource(xBuilder).setRefresh(false).setId(id)
-					.setConsistencyLevel(WriteConsistencyLevel.ONE);
+					.setConsistencyLevel(WriteConsistencyLevel.ONE).setReplicationType(ReplicationType.ASYNC);
 
 			bulkRequest.add(insert);
 			sizeBulk++;
 
 			line = br.readLine();
-			if (sizeBulk > 1500 || line == null || line.equals("]")) {
+			if (sizeBulk > BULK_SIZE || line == null || line.equals("]")) {
 				while(true) {
 					try {
-						pool.execute(new BulkInsert(bulkRequest));
+						insert(bulkRequest);
 						break;
 					}catch(RejectedExecutionException e){
 						continue;
@@ -247,49 +274,58 @@ public class DirectInsertES {
 		}
 		
 		br.close();
-		pool.shutdown();
-		pool.awaitTermination(1, TimeUnit.DAYS);
-		this.close();
 
 		System.out.println("Time to insert: "
 				+ (System.currentTimeMillis() - t));
 		System.out.println("Number of lines with error: " +lineWithErrorsOnFile);
-		System.exit(0);
 	}
 	
-	public void close() {
-		client.close();
-	}
-
-	private static class BulkInsert implements Runnable {
-		BulkRequestBuilder bulkRequest;
-		
-		public BulkInsert(BulkRequestBuilder bulkRequest) {
-			super();
-			this.bulkRequest = bulkRequest;
-		}
-
-		@Override
-		public void run() {
-			BulkResponse bulkResponse = null;
-			while (true) {
+	private void insert(BulkRequestBuilder bulkRequest){
+		BulkResponse bulkResponse = null;
+		while (true) {
+			try {
+				bulkResponse = bulkRequest.execute().actionGet();
+				break;
+			} catch(NoNodeAvailableException e1){
+				waitNodeBeAvailable();
+			} catch (Exception e) {
 				try {
-					bulkResponse = bulkRequest.execute().actionGet();
-					break;
-				} catch (Exception e) {
-					try {
-						Thread.sleep(1000);
-					} catch (InterruptedException e1) {
-						e1.printStackTrace();
+					Thread.sleep(1000);
+				} catch (InterruptedException e1) {
+					e1.printStackTrace();
+				}
+				
+				System.out.println("timed out after [5001ms].\n"
+						+ e.getMessage());
+			}
+		}
+		if (bulkResponse.hasFailures()) {
+			System.out.println("ERROR ON BULK");
+		}
+		bulkResponse = null;
+	}
+	private void waitNodeBeAvailable(){
+		try {
+			for(int i = 0;i < 10; i++) {
+				Thread.sleep(1000 * i);
+				try {
+					if (client.admin().cluster()
+							.health(new ClusterHealthRequest()).get()
+							.getStatus().equals(ClusterHealthStatus.RED)) {
+						System.out.println("WAIT YELLOW");
+						client.admin().cluster().prepareHealth()
+								.setWaitForYellowStatus().get();
+						continue;
 					}
-					System.out.println("timed out after [5001ms].\n"
-							+ e.getMessage());
+				} catch(NoNodeAvailableException e) {
+					continue;
 				}
 			}
-			if (bulkResponse.hasFailures()) {
-				System.out.println("ERROR ON BULK");
-			}
-			bulkResponse = null;
+		} catch(Exception e3) {
+			System.err.println("Error to wait node be available. Error: " +e3.getMessage());
+			e3.printStackTrace();
+			client.close();
+			System.exit(0);
 		}
 	}
 }
