@@ -6,14 +6,18 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.text.DateFormat;
 import java.text.ParseException;
-import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Date;
-import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.elasticsearch.action.WriteConsistencyLevel;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest;
@@ -133,35 +137,15 @@ public class DirectInsertES {
 			String fileNameContains = properties.getProperty("file_name_contains", null);
 			
 			if(url != null && username != null && password != null && containerName != null){
-				List<StoredObject> validObjects = getValidObjects(username, password, url, containerName, from, until, fileNameContains);
+				ThreadPoolExecutor pool = new ThreadPoolExecutor(8, 8, 1, TimeUnit.DAYS, new LinkedBlockingQueue<Runnable>());
+				SortedSet<StoredObject> validObjects = getValidObjects(username, password, url, containerName, from, until, fileNameContains);
 				
 				//Download each file and insert
 				for(StoredObject object: validObjects) {
-					String name = object.getName();
-					File file = new File(name);
-					System.out.println("Downloading file " +name +" ...");
-					object.downloadObject(file);
-					System.out.println("Downloading file " +name +" FINISHED");
-					System.out.println("Decompressing file " +name +" ...");
-					Process p = Runtime.getRuntime().exec(
-							"tar -jxvf " + file.getName());
-					p.waitFor();
-					System.out.println("File " +name +" DECOMPRESSED");
-					//delete compacted file
-					file.delete();
-					if(name.endsWith(".tar.bz2"))
-						name = name.replace(".tar.bz2", "");
-					
-					//Some files are enclosed in data directory
-					if(!new File(name).exists())
-						name = "data/" +name +".json";
-					
-					System.out.println("Inserting file " +name +" ...");
-					insertES.insertFile(name, layerName, twitter4jFormat);
-					//delete json file
-					new File(name).delete();
-					System.out.println("Insert file " +name +" FINISHED");
+					pool.execute(new ThreadInsert(insertES, layerName, twitter4jFormat, object));
 				}
+				pool.shutdown();
+				pool.awaitTermination(10, TimeUnit.DAYS);
 			}
 			
 			client.close();
@@ -172,8 +156,8 @@ public class DirectInsertES {
 		}
 	}
 
-	private static List<StoredObject> getValidObjects(String username, String password, String url, String containerName, String from, String until, String fileNameContains) throws ParseException{
-		List<StoredObject> validObjects = new ArrayList<StoredObject>();
+	private static SortedSet<StoredObject> getValidObjects(String username, String password, String url, String containerName, String from, String until, String fileNameContains) throws ParseException{
+		SortedSet<StoredObject> validObjects = new TreeSet<StoredObject>(new StoreObjectComp());
 		
 		AccountConfig config = new AccountConfig();
 		config.setUsername(username);
@@ -215,7 +199,12 @@ public class DirectInsertES {
 	}
 	
 	private void insertFile(String filePath, String layerName, boolean twitter4jFormat) throws IOException, InterruptedException, ExecutionException{
-		BufferedReader br = new BufferedReader(new FileReader(filePath));
+		File file = new File(filePath);
+		if(!file.exists()) {
+			System.out.println("File " +file.getAbsolutePath() +" doesnt exists.");
+			return;
+		}
+		BufferedReader br = new BufferedReader(new FileReader(file));
 		long t = System.currentTimeMillis();
 		long inserted = 0;
 		int sizeBulk = 0;
@@ -327,5 +316,62 @@ public class DirectInsertES {
 			client.close();
 			System.exit(0);
 		}
+	}
+	
+	private static class StoreObjectComp implements Comparator<StoredObject>{
+		 
+	    @Override
+	    public int compare(StoredObject e1, StoredObject e2) {
+	        return e1.getLastModifiedAsDate().compareTo(e2.getLastModifiedAsDate());
+	    }
+	}
+	
+	private static class ThreadInsert implements Runnable {
+		private DirectInsertES insertES;
+		private String layerName;
+		private boolean twitter4jFormat;
+		private StoredObject object;
+		
+		public ThreadInsert(DirectInsertES insertES, String layerName,
+				boolean twitter4jFormat, StoredObject object) {
+			super();
+			this.insertES = insertES;
+			this.layerName = layerName;
+			this.twitter4jFormat = twitter4jFormat;
+			this.object = object;
+		}
+
+		@Override
+		public void run() {
+			try {
+				String name = object.getName();
+				File file = new File(name);
+				System.out.println("Downloading file " +name +" ...");
+				object.downloadObject(file);
+				System.out.println("Downloading file " +name +" FINISHED");
+				System.out.println("Decompressing file " +name +" ...");
+				Process p = Runtime.getRuntime().exec(
+						"tar -jxvf " + file.getName());
+				p.waitFor();
+				System.out.println("File " +name +" DECOMPRESSED");
+				//delete compacted file
+				file.delete();
+				if(name.endsWith(".tar.bz2"))
+					name = name.replace(".tar.bz2", "");
+				
+				//Some files are enclosed in data directory
+				if(!new File(name).exists())
+					name = "data/" +name +".json";
+				
+				System.out.println("Inserting file " +name +" from " +object.getLastModified() +" ...");
+				insertES.insertFile(name, layerName, twitter4jFormat);
+				//delete json file
+				new File(name).delete();
+				System.out.println("Insert file " +name +" FINISHED");
+			} catch(Exception e) {
+				e.printStackTrace();
+			}
+		}
+		
 	}
 }
