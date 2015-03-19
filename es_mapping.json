@@ -2,7 +2,8 @@
   "properties": {
     "location": {
       "type": "geo_point",
-      "lat_lon": true
+      "lat_lon": true,
+      "index": "not_analyzed"
     },
     "created_at": {
       "type": "date"
@@ -11,10 +12,17 @@
       "type": "long"
     },
     "text": {
-      "type": "string"
+      "type": "string",
+      "fields": {
+        "raw": {
+          "type": "string",
+          "index": "not_analyzed"
+        }
+      }
     },
     "source": {
-      "type": "string"
+      "type": "string",
+      "index": "not_analyzed"
     },
     "truncated": {
       "type": "boolean"
@@ -26,10 +34,17 @@
       "type": "long"
     },
     "in_reply_to_screen_name": {
-      "type": "string"
+      "type": "string",
+      "fields": {
+        "raw": {
+          "type": "string",
+          "index": "not_analyzed"
+        }
+      }
     },
     "contributors": {
-      "type": "string"
+      "type": "string",
+      "index": "not_analyzed"
     },
     "retweet_count": {
       "type": "long"
@@ -47,10 +62,18 @@
       "type": "boolean"
     },
     "lang": {
-      "type": "string"
+      "type": "string",
+      "index": "not_analyzed"
     },
     "timestamp_ms": {
       "type": "long"
+    },
+    "retweet": {
+      "properties": {
+        "id": {
+          "type": "long"
+        }
+      }
     },
     "user": {
       "properties": {
@@ -58,19 +81,34 @@
           "type": "long"
         },
         "name": {
-          "type": "string"
+          "type": "string",
+          "fields": {
+            "raw": {
+              "type": "string",
+              "index": "not_analyzed"
+            }
+          }
         },
         "screen_name": {
-          "type": "string"
+          "type": "string",
+          "fields": {
+            "raw": {
+              "type": "string",
+              "index": "not_analyzed"
+            }
+          }
         },
         "location": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "url": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "description": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "followers_count": {
           "type": "long"
@@ -94,50 +132,87 @@
           "type": "long"
         },
         "time_zone": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "geo_enabled": {
           "type": "boolean"
         },
         "lang": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "profile_background_image_url": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "profile_image_url": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "profile_banner_url": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         }
       }
     },
     "place": {
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "url": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "place_type": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "name": {
-          "type": "string"
+          "type": "string",
+          "fields": {
+            "raw": {
+              "type": "string",
+              "index": "not_analyzed"
+            }
+          }
         },
         "full_name": {
-          "type": "string"
+          "type": "string",
+          "fields": {
+            "raw": {
+              "type": "string",
+              "index": "not_analyzed"
+            }
+          }
         },
         "country_code": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         },
         "country": {
-          "type": "string"
+          "type": "string",
+          "fields": {
+            "raw": {
+              "type": "string",
+              "index": "not_analyzed"
+            }
+          }
         },
-        "street_address": {
-          "type": "string"
+        "attributes": {
+          "properties": {
+            "street_address": {
+              "type": "string",
+              "fields": {
+                "raw": {
+                  "type": "string",
+                  "index": "not_analyzed"
+                }
+              }
+            }
+          }
         },
         "bounding_box": {
           "type": "geo_shape",
@@ -151,12 +226,10 @@
         "hashtags": {
           "properties": {
             "text": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
-            "start": {
-              "type": "integer"
-            },
-            "end": {
+            "indices": {
               "type": "integer"
             }
           }
@@ -164,19 +237,19 @@
         "urls": {
           "properties": {
             "expanded_url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
-            "start": {
-              "type": "integer"
-            },
-            "end": {
+            "indices": {
               "type": "integer"
             },
             "display_url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
             "url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             }
           }
         },
@@ -186,28 +259,30 @@
               "type": "long"
             },
             "name": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
-            "start": {
-              "type": "integer"
-            },
-            "end": {
+            "indices": {
               "type": "integer"
             },
             "screen_name": {
-              "type": "string"
+              "type": "string",
+              "fields": {
+                "raw": {
+                  "type": "string",
+                  "index": "not_analyzed"
+                }
+              }
             }
           }
         },
         "symbols": {
           "properties": {
             "text": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
-            "start": {
-              "type": "integer"
-            },
-            "end": {
+            "indices": {
               "type": "integer"
             }
           }
@@ -222,7 +297,8 @@
                       "type": "integer"
                     },
                     "resize": {
-                      "type": "string"
+                      "type": "string",
+                      "index": "not_analyzed"
                     },
                     "h": {
                       "type": "integer"
@@ -235,7 +311,8 @@
                       "type": "integer"
                     },
                     "resize": {
-                      "type": "string"
+                      "type": "string",
+                      "index": "not_analyzed"
                     },
                     "h": {
                       "type": "integer"
@@ -248,7 +325,8 @@
                       "type": "integer"
                     },
                     "resize": {
-                      "type": "string"
+                      "type": "string",
+                      "index": "not_analyzed"
                     },
                     "h": {
                       "type": "integer"
@@ -261,7 +339,8 @@
                       "type": "integer"
                     },
                     "resize": {
-                      "type": "string"
+                      "type": "string",
+                      "index": "not_analyzed"
                     },
                     "h": {
                       "type": "integer"
@@ -274,28 +353,31 @@
               "type": "long"
             },
             "media_url_https": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
             "media_url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
             "expanded_url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
-            "start": {
-              "type": "integer"
-            },
-            "end": {
+            "indices": {
               "type": "integer"
             },
             "type": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
             "display_url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
             "url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             }
           }
         }
@@ -304,7 +386,8 @@
     "scopes": {
       "properties": {
         "place_ids": {
-          "type": "string"
+          "type": "string",
+          "index": "not_analyzed"
         }
       }
     },
@@ -320,7 +403,8 @@
                       "type": "long"
                     },
                     "resize": {
-                      "type": "string"
+                      "type": "string",
+                      "index": "not_analyzed"
                     },
                     "h": {
                       "type": "long"
@@ -333,7 +417,8 @@
                       "type": "long"
                     },
                     "resize": {
-                      "type": "string"
+                      "type": "string",
+                      "index": "not_analyzed"
                     },
                     "h": {
                       "type": "long"
@@ -346,7 +431,8 @@
                       "type": "long"
                     },
                     "resize": {
-                      "type": "string"
+                      "type": "string",
+                      "index": "not_analyzed"
                     },
                     "h": {
                       "type": "long"
@@ -359,7 +445,8 @@
                       "type": "long"
                     },
                     "resize": {
-                      "type": "string"
+                      "type": "string",
+                      "index": "not_analyzed"
                     },
                     "h": {
                       "type": "long"
@@ -372,31 +459,34 @@
               "type": "long"
             },
             "media_url_https": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
             "media_url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
             "expanded_url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
-            "start": {
-              "type": "integer"
-            },
-            "end": {
+            "indices": {
               "type": "integer"
             },
             "source_status_id": {
               "type": "long"
             },
             "type": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
             "display_url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             },
             "url": {
-              "type": "string"
+              "type": "string",
+              "index": "not_analyzed"
             }
           }
         }

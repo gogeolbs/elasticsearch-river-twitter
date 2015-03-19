@@ -24,11 +24,15 @@ import org.elasticsearch.indices.IndexAlreadyExistsException;
 import org.elasticsearch.river.twitter.utils.TwitterInfo;
 
 public class TwitterElasticSearchIndexing {
+	//How many real time twitter clients are inserting? Put here.
+	private static final int NUM_INSERT_CLIENTS = 5;
 	private Client client;
 
 	private String queryIndexAliasName;
 	private String insertIndexAliasName;
 	private String indexName;
+	private String originalIndexName;
+	private String queryAllIndexAliasName;
 
 	private String typeName;
 
@@ -40,30 +44,53 @@ public class TwitterElasticSearchIndexing {
 	private int indexVersion = 1;
 	private long indexSize = 0;
 	private long totalIndexSize = 0;
+	private int numIndexesToPoint;
+	private int numIndexesActuallyPointed = 0;
+	
 	
 	public TwitterElasticSearchIndexing(Client client, String queryIndexAliasName,
 			String insertIndexAliasName, String indexName, String typeName,
 			long maxEachAliasIndexSize, long maxIndexSize, int numShards,
-			int replicationFactor) {
+			int replicationFactor, int numIndexesToPoint) {
 		this.client = client;
 		this.queryIndexAliasName = queryIndexAliasName;
+		this.queryAllIndexAliasName = queryIndexAliasName +"_all";
 		this.insertIndexAliasName = insertIndexAliasName;
 		this.indexName = indexName;
+		this.originalIndexName = indexName;
 		this.typeName = typeName;
 		this.maxEachAliasIndexSize = maxEachAliasIndexSize;
 		this.maxIndexSize = maxIndexSize;
 		this.numShards = numShards;
 		this.replicationFactor = replicationFactor;
+		this.numIndexesToPoint = numIndexesToPoint;
 	}
-
-	public void initializeSlaveIndexControl() throws InterruptedException,
-			ExecutionException {
+	
+	public void createIndex() throws InterruptedException, ExecutionException {
 		boolean indiceExist = client.admin().indices()
 				.exists(new IndicesExistsRequest(indexName)).get().isExists();
 
 		if (!indiceExist) {
-			String queryIndexAliasName = this.indexName;
-			String indexName = this.indexName + "_1";
+			Settings indexSettings = ImmutableSettings.settingsBuilder()
+					.put("number_of_shards", numShards)
+					.put("number_of_replicas", replicationFactor).build();
+
+			client.admin().indices().prepareCreate(indexName)
+					.setSettings(indexSettings).execute().actionGet();
+
+			if (client.admin().indices().prepareGetMappings(indexName)
+					.setTypes(typeName).get().getMappings().isEmpty()) {
+				createMapping();
+			}
+		}
+	}
+
+	public void initializeSlaveIndexControl() throws InterruptedException,
+			ExecutionException {
+		int[] versions = getMinAndMaxVersion(true);
+
+		if (versions == null) {
+			indexName = this.indexName + "_1";
 			Settings indexSettings = ImmutableSettings.settingsBuilder()
 					.put("number_of_shards", numShards)
 					.put("number_of_replicas", replicationFactor).build();
@@ -82,6 +109,12 @@ public class TwitterElasticSearchIndexing {
 							new IndicesAliasesRequest().addAlias(
 									queryIndexAliasName, indexName))
 					.actionGet();
+			client.admin()
+			.indices()
+			.aliases(
+					new IndicesAliasesRequest().addAlias(
+							queryAllIndexAliasName, indexName))
+			.actionGet();
 
 			if (client.admin().indices().prepareGetMappings(indexName)
 					.setTypes(typeName).get().getMappings().isEmpty()) {
@@ -92,7 +125,7 @@ public class TwitterElasticSearchIndexing {
 
 	public void initializeMasterIndexControl() {
 		try {
-			int[] versions = getMinAndMaxVersion();
+			int[] versions = getMinAndMaxVersion(true);
 			if (versions == null) {
 				indexName = indexName + "_" + indexVersion;
 				Settings indexSettings = ImmutableSettings.settingsBuilder()
@@ -112,34 +145,38 @@ public class TwitterElasticSearchIndexing {
 								new IndicesAliasesRequest().addAlias(
 										queryIndexAliasName, indexName))
 						.actionGet();
+				client.admin()
+				.indices()
+				.aliases(
+						new IndicesAliasesRequest().addAlias(
+								queryAllIndexAliasName, indexName))
+				.actionGet();
 
 				if (client.admin().indices().prepareGetMappings(indexName)
 						.setTypes(typeName).get().getMappings().isEmpty()) {
 					createMapping();
 				}
+				
+				numIndexesActuallyPointed++;
 			} else {
-				indexVersion = getMinAndMaxVersion()[1]; // get latest index
-															// version
-
-				indexName = queryIndexAliasName + "_" + indexVersion;
-				indexSize = getIndexSize(indexName);
-				totalIndexSize = getIndexSize(queryIndexAliasName);
+				indexVersion = versions[1]; // get latest index version
+				indexName = originalIndexName + "_" + indexVersion;
+				indexSize = getIndexSize(indexName) / NUM_INSERT_CLIENTS;
+				totalIndexSize = getIndexSize(queryAllIndexAliasName);
 				verifyAlias();
 			}
 		} catch (Exception e) {
 			if (ExceptionsHelper.unwrapCause(e) instanceof IndexAlreadyExistsException) {
-				indexVersion = getMinAndMaxVersion()[1]; // get latest index
-															// version
+				indexVersion = getMinAndMaxVersion(true)[1]; // get latest index version
 
-				indexName = queryIndexAliasName + "_" + indexVersion;
-				indexSize = getIndexSize(indexName);
-				totalIndexSize = getIndexSize(queryIndexAliasName);
+				indexName = originalIndexName + "_" + indexVersion;
+				indexSize = getIndexSize(indexName) / NUM_INSERT_CLIENTS;
+				totalIndexSize = getIndexSize(queryAllIndexAliasName);
 				verifyAlias();
 
 			} else if (ExceptionsHelper.unwrapCause(e) instanceof ClusterBlockException) {
 			} else {
 				e.printStackTrace();
-				System.exit(0);
 			}
 		}
 	}
@@ -175,12 +212,20 @@ public class TwitterElasticSearchIndexing {
 		return stats.getPrimaries().getDocs().getCount();
 	}
 
-	private int[] getMinAndMaxVersion() {
+	private int[] getMinAndMaxVersion(boolean entireIndex) {
 		int[] versions = new int[2];
 
 		GetAliasesResponse response = client.admin().indices()
 				.getAliases(new GetAliasesRequest(queryIndexAliasName))
 				.actionGet();
+		numIndexesActuallyPointed = response.getAliases().size();
+		
+		//get min max version from entire index
+		if(entireIndex)
+			response = client.admin().indices()
+					.getAliases(new GetAliasesRequest(queryAllIndexAliasName))
+					.actionGet();
+		
 		int maxVersion = Integer.MIN_VALUE;
 		int minVersion = Integer.MAX_VALUE;
 		ImmutableOpenMap<String, List<AliasMetaData>> aliases = response
@@ -214,14 +259,9 @@ public class TwitterElasticSearchIndexing {
 		indexSize += numTweetsReceived;
 		totalIndexSize += numTweetsReceived;
 		if (indexSize >= maxEachAliasIndexSize) {
-			// remove previous insert alias to insert on new index
-			client.admin()
-					.indices()
-					.aliases(
-							new IndicesAliasesRequest().removeAlias(indexName,
-									insertIndexAliasName)).actionGet();
-			indexVersion++;
-			indexName = queryIndexAliasName + "_" + indexVersion;
+			
+			String oldIndexName = indexName;
+			indexName = originalIndexName + "_" + ++indexVersion;
 
 			Settings indexSettings = ImmutableSettings.settingsBuilder()
 					.put("number_of_shards", numShards)
@@ -230,6 +270,16 @@ public class TwitterElasticSearchIndexing {
 			// create new empty index
 			client.admin().indices().prepareCreate(indexName)
 					.setSettings(indexSettings).execute().actionGet();
+			createMapping();
+			
+			//update the insert alias
+			client.admin().indices().aliases(
+					new IndicesAliasesRequest().addAlias(
+							insertIndexAliasName, indexName));
+			client.admin().indices().aliases(
+							new IndicesAliasesRequest().removeAlias(oldIndexName,
+									insertIndexAliasName));
+			
 			// point the query alias to new index
 			client.admin()
 					.indices()
@@ -237,19 +287,31 @@ public class TwitterElasticSearchIndexing {
 							new IndicesAliasesRequest().addAlias(
 									queryIndexAliasName, indexName))
 					.actionGet();
-			// point the insert alias to new index
+			// point the query alias to entire index
 			client.admin()
 					.indices()
 					.aliases(
 							new IndicesAliasesRequest().addAlias(
-									insertIndexAliasName, indexName))
+									queryAllIndexAliasName, indexName))
 					.actionGet();
+			
+			if(numIndexesToPoint <= numIndexesActuallyPointed){
+				int minVersion = getMinAndMaxVersion(false)[0];
+				
+				// remove previous query alias
+				client.admin()
+						.indices()
+						.aliases(
+								new IndicesAliasesRequest().removeAlias(originalIndexName +"_" +minVersion,
+										queryIndexAliasName)).actionGet();
+			} else
+				numIndexesActuallyPointed++;
 
 			// Delete the oldest index if the total size of the indexes is
 			// greater than maxIndexSize to control the index size
 			if (totalIndexSize > maxIndexSize) {
-				int minVersion = getMinAndMaxVersion()[0];
-				String indexToDelete = queryIndexAliasName + "_" + minVersion;
+				int minVersion = getMinAndMaxVersion(true)[0];
+				String indexToDelete = originalIndexName + "_" + minVersion;
 				client.admin().indices()
 						.delete(new DeleteIndexRequest(indexToDelete));
 				totalIndexSize -= maxEachAliasIndexSize;

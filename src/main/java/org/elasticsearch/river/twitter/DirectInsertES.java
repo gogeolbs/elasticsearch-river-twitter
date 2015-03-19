@@ -74,7 +74,7 @@ public class DirectInsertES {
         String queryIndexAliasName = indexName;
         String typeName = "attr";
         
-		elasticIndexing = new TwitterElasticSearchIndexing(client, queryIndexAliasName, insertIndexAliasName, indexName, typeName, maxEachAliasIndexSize, maxIndexSize, numShards, replicationFactor);
+		elasticIndexing = new TwitterElasticSearchIndexing(client, queryIndexAliasName, insertIndexAliasName, indexName, typeName, maxEachAliasIndexSize, maxIndexSize, numShards, replicationFactor, 0);
 	}
 	
 	public static void main(String[] args) {
@@ -118,9 +118,13 @@ public class DirectInsertES {
 			DirectInsertES insertES = new DirectInsertES(seeds, elasticCluster, layerName, maxEachAliasIndexSize, maxIndexSize, numShards, replicationFactor);
 			
 			boolean twitter4jFormat = Boolean.parseBoolean(properties.getProperty("files_twitter4j_format", "false"));
+			boolean indexSizeControl = Boolean.parseBoolean(properties.getProperty("index_size_control", "true"));
 			
 			//initialize the ES index if it 
-			elasticIndexing.initializeSlaveIndexControl();
+			if(indexSizeControl)
+				elasticIndexing.initializeSlaveIndexControl();
+			else
+				elasticIndexing.createIndex();
 			
 			//User can insert a local file too
 			String filePath = properties.getProperty("file_path");
@@ -135,14 +139,25 @@ public class DirectInsertES {
 			String from = properties.getProperty("from_date", null);
 			String until = properties.getProperty("until_date", null);
 			String fileNameContains = properties.getProperty("file_name_contains", null);
+			int numMaxFilesToInsert = Integer.parseInt(properties.getProperty("num_max_files", String.valueOf(Integer.MAX_VALUE)));
+			int numThreads = Integer.parseInt(properties.getProperty("num_threads_to_insert", String.valueOf("1")));
+
 			
-			if(url != null && username != null && password != null && containerName != null){
-				ThreadPoolExecutor pool = new ThreadPoolExecutor(8, 8, 1, TimeUnit.DAYS, new LinkedBlockingQueue<Runnable>());
+			if(url != null && username != null && password != null && containerName != null) {
+				ThreadPoolExecutor pool = new ThreadPoolExecutor(numThreads, numThreads, 1, TimeUnit.DAYS, new LinkedBlockingQueue<Runnable>());
 				SortedSet<StoredObject> validObjects = getValidObjects(username, password, url, containerName, from, until, fileNameContains);
 				
+				int numFilesInserted = 0;
 				//Download each file and insert
 				for(StoredObject object: validObjects) {
 					pool.execute(new ThreadInsert(insertES, layerName, twitter4jFormat, object));
+					
+					//Control the number of files to insert
+					numFilesInserted++;
+					if(numFilesInserted >= numMaxFilesToInsert) {
+						System.out.println("Inserting " +numMaxFilesToInsert +" files.");
+						break;
+					}
 				}
 				pool.shutdown();
 				pool.awaitTermination(10, TimeUnit.DAYS);
@@ -157,6 +172,7 @@ public class DirectInsertES {
 	}
 
 	private static SortedSet<StoredObject> getValidObjects(String username, String password, String url, String containerName, String from, String until, String fileNameContains) throws ParseException{
+		//sorted set by date in a decreasing order.
 		SortedSet<StoredObject> validObjects = new TreeSet<StoredObject>(new StoreObjectComp());
 		
 		AccountConfig config = new AccountConfig();
@@ -322,7 +338,7 @@ public class DirectInsertES {
 		 
 	    @Override
 	    public int compare(StoredObject e1, StoredObject e2) {
-	        return e1.getLastModifiedAsDate().compareTo(e2.getLastModifiedAsDate());
+	        return e2.getLastModifiedAsDate().compareTo(e1.getLastModifiedAsDate());
 	    }
 	}
 	

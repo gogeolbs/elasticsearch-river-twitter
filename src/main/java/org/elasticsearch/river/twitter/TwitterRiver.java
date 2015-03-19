@@ -535,26 +535,26 @@ public class TwitterRiver extends AbstractRiverComponent implements River {
 						.setWaitForYellowStatus().setTimeout(TimeValue.timeValueMinutes(2)).get();
 			}
         	
-        	int[] versions = getMinAndMaxVersion();
-        	if(versions == null) {
-	        	indexName = indexName +"_" +indexVersion ;
-	            logger.debug("Trying to create index [{}]", indexName);
-	            Settings indexSettings = ImmutableSettings.settingsBuilder()
-	    				.put("number_of_shards", numShards)
-	    				.put("number_of_replicas", replicationFactor).build();
-	            client.admin().indices().prepareCreate(indexName).setSettings(indexSettings).execute().actionGet();
-	            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(insertIndexAliasName, indexName)).actionGet();
-	            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(queryIndexAliasName, indexName)).actionGet();
-	            logger.info("Create new Index [{}] with version: [{}]", indexName, indexVersion);
-        	} else {
-        		indexVersion = getMinAndMaxVersion()[1]; //get latest index version
-            	logger.info("Recovering Index [{}] with version: [{}]", indexName, indexVersion);
-            	
-            	indexName = queryIndexAliasName +"_" +indexVersion;
-            	indexSize = getIndexSize(indexName);
-            	totalIndexSize = getIndexSize(queryIndexAliasName);
-            	verifyAlias();
-        	}
+//        	int[] versions = getMinAndMaxVersion();
+//        	if(versions == null) {
+//	        	indexName = indexName +"_" +indexVersion ;
+//	            logger.debug("Trying to create index [{}]", indexName);
+//	            Settings indexSettings = ImmutableSettings.settingsBuilder()
+//	    				.put("number_of_shards", numShards)
+//	    				.put("number_of_replicas", replicationFactor).build();
+//	            client.admin().indices().prepareCreate(indexName).setSettings(indexSettings).execute().actionGet();
+//	            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(insertIndexAliasName, indexName)).actionGet();
+//	            client.admin().indices().aliases(new IndicesAliasesRequest().addAlias(queryIndexAliasName, indexName)).actionGet();
+//	            logger.info("Create new Index [{}] with version: [{}]", indexName, indexVersion);
+//        	} else {
+//        		indexVersion = getMinAndMaxVersion()[1]; //get latest index version
+//            	logger.info("Recovering Index [{}] with version: [{}]", indexName, indexVersion);
+//            	
+//            	indexName = queryIndexAliasName +"_" +indexVersion;
+//            	indexSize = getIndexSize(indexName);
+//            	totalIndexSize = getIndexSize(queryIndexAliasName);
+//            	verifyAlias();
+//        	}
         } catch (Exception e) {
             if (ExceptionsHelper.unwrapCause(e) instanceof IndexAlreadyExistsException) {
             	indexVersion = getMinAndMaxVersion()[1]; //get latest index version

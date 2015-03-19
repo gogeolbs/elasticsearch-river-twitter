@@ -52,48 +52,29 @@ public class TwitterInsertBuilder {
         if (status.getRetweetCount() >= 0) {
             builder.field("retweet_count", status.getRetweetCount());
         }
+        
         if (status.getFavoriteCount() >= 0) {
             builder.field("favorite_count", status.getFavoriteCount());
         }
+        
         builder.field("favorited", status.isFavorited());
         builder.field("retweeted", status.isRetweeted());
         builder.field("possibly_sensitive", status.isPossiblySensitive());
         builder.field("lang", status.getLang());
         builder.field("timestamp_ms", System.currentTimeMillis());
 
+        if(status.getRetweetedStatus() != null) {
+	        //retweet
+	        builder.startObject("retweet");
+	        builder.field("id", status.getRetweetedStatus().getId());
+	        builder.endObject();
+	        if(status.getRetweetedStatus().getRetweetCount() > 0)
+	        	System.out.println(status.getRetweetedStatus().getRetweetCount());
+        }
+        
         //user
         builder.startObject("user");
-        builder.field("id", status.getUser().getId());
-        builder.field("name", status.getUser().getName());
-        builder.field("screen_name", status.getUser().getScreenName());
-        builder.field("location", status.getUser().getLocation());
-        builder.field("url", status.getUser().getURL());
-        builder.field("description", status.getUser().getDescription());
-        if (status.getUser().getFollowersCount() >= 0) {
-            builder.field("followers_count", status.getUser().getFollowersCount());
-        }
-        if (status.getUser().getFriendsCount() >= 0) {
-            builder.field("friends_count", status.getUser().getFriendsCount());
-        }
-        if (status.getUser().getListedCount() >= 0) {
-            builder.field("listed_count", status.getUser().getListedCount());
-        }
-        if (status.getUser().getFavouritesCount() >= 0) {
-            builder.field("favourites_count", status.getUser().getFavouritesCount());
-        }
-        if (status.getUser().getStatusesCount() >= 0) {
-            builder.field("statuses_count", status.getUser().getStatusesCount());
-        }
-        builder.field("created_at", status.getUser().getCreatedAt());
-        if (status.getUser().getUtcOffset() >= 0) {
-            builder.field("utc_offset", status.getUser().getUtcOffset());
-        }
-        builder.field("time_zone", status.getUser().getTimeZone());
-        builder.field("geo_enabled", status.getUser().isGeoEnabled());
-        builder.field("lang", status.getUser().getLang());
-        builder.field("profile_background_image_url", status.getUser().getProfileBackgroundImageURL());
-        builder.field("profile_image_url", status.getUser().getProfileImageURL());
-        builder.field("profile_banner_url", status.getUser().getProfileBannerURL());
+        constructTwitterUser(status, builder);
         //end User
         builder.endObject();
         
@@ -339,5 +320,39 @@ public class TwitterInsertBuilder {
 		 builder.field("h", size.getHeight());
 		 builder.endObject();
 		 
+	 }
+	 
+	 private static void constructTwitterUser(Status status, XContentBuilder builder) throws IOException{
+		builder.field("id", status.getUser().getId());
+	    builder.field("name", status.getUser().getName());
+	    builder.field("screen_name", status.getUser().getScreenName());
+	    builder.field("location", status.getUser().getLocation());
+	    builder.field("url", status.getUser().getURL());
+	    builder.field("description", status.getUser().getDescription());
+	    if (status.getUser().getFollowersCount() >= 0) {
+	        builder.field("followers_count", status.getUser().getFollowersCount());
+	    }
+	    if (status.getUser().getFriendsCount() >= 0) {
+	        builder.field("friends_count", status.getUser().getFriendsCount());
+	    }
+	    if (status.getUser().getListedCount() >= 0) {
+	        builder.field("listed_count", status.getUser().getListedCount());
+	    }
+	    if (status.getUser().getFavouritesCount() >= 0) {
+	        builder.field("favourites_count", status.getUser().getFavouritesCount());
+	    }
+	    if (status.getUser().getStatusesCount() >= 0) {
+	        builder.field("statuses_count", status.getUser().getStatusesCount());
+	    }
+	    builder.field("created_at", status.getUser().getCreatedAt());
+	    if (status.getUser().getUtcOffset() >= 0) {
+	        builder.field("utc_offset", status.getUser().getUtcOffset());
+	    }
+	    builder.field("time_zone", status.getUser().getTimeZone());
+	    builder.field("geo_enabled", status.getUser().isGeoEnabled());
+	    builder.field("lang", status.getUser().getLang());
+	    builder.field("profile_background_image_url", status.getUser().getProfileBackgroundImageURL());
+	    builder.field("profile_image_url", status.getUser().getProfileImageURL());
+	    builder.field("profile_banner_url", status.getUser().getProfileBannerURL());
 	 }
 }

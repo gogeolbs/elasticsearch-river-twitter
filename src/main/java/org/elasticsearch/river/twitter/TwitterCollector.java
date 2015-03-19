@@ -62,6 +62,7 @@ public class TwitterCollector {
 	private static final int DEFAULT_REFRESH_TIME = 30;
 	private static final int DEFAULT_NUM_SHARDS = 5;
 	private static final int DEFAULT_REPLICATION_FACTOR = 1;
+	private static final int DEFAULT_NUM_INDEXES_TO_QUERY = 3;
 	private final long maxEachAliasIndexSize;
 	private final long maxIndexSize;
 	private final int bulkSize;
@@ -69,6 +70,7 @@ public class TwitterCollector {
 	private final TimeValue bulkFlushInterval;
 	private final int numShards;
 	private final int replicationFactor;
+	private final int numIndexesToQuery;
 
 	private final boolean masterNode;
 
@@ -328,6 +330,8 @@ public class TwitterCollector {
         if (riverSettings.settings().containsKey("index")) {
             Map<String, Object> indexSettings = (Map<String, Object>) riverSettings.settings().get("index");
             indexName = XContentMapValues.nodeStringValue(indexSettings.get("index"), "twitter");
+            queryIndexAliasName = XContentMapValues.nodeStringValue(indexSettings.get("query_alias"), indexName);
+            insertIndexAliasName = queryIndexAliasName +"_index";
             maxEachAliasIndexSize = XContentMapValues.nodeLongValue(indexSettings.get("max_each_alias_index_size"), DEFAULT_MAX_EACH_INDEX_SIZE);
             maxIndexSize = XContentMapValues.nodeLongValue(indexSettings.get("max_index_size"), DEFAULT_MAX_INDEX_SIZE);
             typeName = XContentMapValues.nodeStringValue(indexSettings.get("type"), "status");
@@ -337,8 +341,11 @@ public class TwitterCollector {
             this.maxConcurrentBulk = XContentMapValues.nodeIntegerValue(indexSettings.get("max_concurrent_bulk"), 1);
             numShards = XContentMapValues.nodeIntegerValue(indexSettings.get("num_shards"), DEFAULT_NUM_SHARDS);
             replicationFactor = XContentMapValues.nodeIntegerValue(indexSettings.get("replication_factor"), DEFAULT_REPLICATION_FACTOR);
+            numIndexesToQuery = XContentMapValues.nodeIntegerValue(indexSettings.get("num_indexes_to_query"), DEFAULT_NUM_INDEXES_TO_QUERY);
         } else {
             indexName = "twitter";
+            queryIndexAliasName = indexName;
+            insertIndexAliasName = queryIndexAliasName +"_index";
             maxEachAliasIndexSize = DEFAULT_MAX_EACH_INDEX_SIZE;
             maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
             typeName = "status";
@@ -347,10 +354,8 @@ public class TwitterCollector {
             replicationFactor = DEFAULT_REPLICATION_FACTOR;
             this.maxConcurrentBulk = 1;
             this.bulkFlushInterval = TimeValue.timeValueSeconds(DEFAULT_REFRESH_TIME);
+            numIndexesToQuery = DEFAULT_NUM_INDEXES_TO_QUERY;
         }
-
-        insertIndexAliasName = indexName +"_index";
-        queryIndexAliasName = indexName;
         
         numTweetsCollected = new AtomicLong(0);
         numTweetsNotCollected = new AtomicLong(0);
@@ -392,7 +397,7 @@ public class TwitterCollector {
 			elasticSearchIndexing = new TwitterElasticSearchIndexing(client,
 					queryIndexAliasName, insertIndexAliasName, indexName,
 					typeName, maxEachAliasIndexSize, maxIndexSize, numShards,
-					replicationFactor);
+					replicationFactor, numIndexesToQuery);
 			
 			/*
 			 * The master node controls the index size and the time to create a
