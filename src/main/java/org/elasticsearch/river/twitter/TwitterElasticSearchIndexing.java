@@ -26,6 +26,7 @@ import org.elasticsearch.river.twitter.utils.TwitterInfo;
 public class TwitterElasticSearchIndexing {
 	//How many real time twitter clients are inserting? Put here.
 	private static final int NUM_INSERT_CLIENTS = 5;
+	private static final String REFRESH_INTERVAL = "30s";
 	private Client client;
 
 	private String queryIndexAliasName;
@@ -51,10 +52,10 @@ public class TwitterElasticSearchIndexing {
 	public TwitterElasticSearchIndexing(Client client, String queryIndexAliasName,
 			String insertIndexAliasName, String indexName, String typeName,
 			long maxEachAliasIndexSize, long maxIndexSize, int numShards,
-			int replicationFactor, int numIndexesToPoint) {
+			int replicationFactor, int numIndexesToPoint, String queryAllIndexAliasName) {
 		this.client = client;
 		this.queryIndexAliasName = queryIndexAliasName;
-		this.queryAllIndexAliasName = queryIndexAliasName +"_all";
+		this.queryAllIndexAliasName = queryAllIndexAliasName;
 		this.insertIndexAliasName = insertIndexAliasName;
 		this.indexName = indexName;
 		this.originalIndexName = indexName;
@@ -73,7 +74,8 @@ public class TwitterElasticSearchIndexing {
 		if (!indiceExist) {
 			Settings indexSettings = ImmutableSettings.settingsBuilder()
 					.put("number_of_shards", numShards)
-					.put("number_of_replicas", replicationFactor).build();
+					.put("number_of_replicas", replicationFactor)
+					.put("refresh_interval", REFRESH_INTERVAL).build();
 
 			client.admin().indices().prepareCreate(indexName)
 					.setSettings(indexSettings).execute().actionGet();
@@ -90,10 +92,11 @@ public class TwitterElasticSearchIndexing {
 		int[] versions = getMinAndMaxVersion(true);
 
 		if (versions == null) {
-			indexName = this.indexName + "_1";
+			indexName = indexName + "_" + indexVersion;
 			Settings indexSettings = ImmutableSettings.settingsBuilder()
 					.put("number_of_shards", numShards)
-					.put("number_of_replicas", replicationFactor).build();
+					.put("number_of_replicas", replicationFactor)
+					.put("refresh_interval", REFRESH_INTERVAL).build();
 
 			client.admin().indices().prepareCreate(indexName)
 					.setSettings(indexSettings).execute().actionGet();
@@ -130,7 +133,8 @@ public class TwitterElasticSearchIndexing {
 				indexName = indexName + "_" + indexVersion;
 				Settings indexSettings = ImmutableSettings.settingsBuilder()
 						.put("number_of_shards", numShards)
-						.put("number_of_replicas", replicationFactor).build();
+						.put("number_of_replicas", replicationFactor)
+						.put("refresh_interval", REFRESH_INTERVAL).build();
 				client.admin().indices().prepareCreate(indexName)
 						.setSettings(indexSettings).execute().actionGet();
 				client.admin()
@@ -265,7 +269,8 @@ public class TwitterElasticSearchIndexing {
 
 			Settings indexSettings = ImmutableSettings.settingsBuilder()
 					.put("number_of_shards", numShards)
-					.put("number_of_replicas", replicationFactor).build();
+					.put("number_of_replicas", replicationFactor)
+					.put("refresh_interval", REFRESH_INTERVAL).build();
 
 			// create new empty index
 			client.admin().indices().prepareCreate(indexName)

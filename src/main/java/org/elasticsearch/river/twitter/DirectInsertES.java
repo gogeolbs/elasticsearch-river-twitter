@@ -70,11 +70,13 @@ public class DirectInsertES {
 		client = new TransportClient(builder.build())
 				.addTransportAddresses(transportAddresses);
 		
+		//FIXME Fix this alias code
 		String insertIndexAliasName = indexName +"_index";
         String queryIndexAliasName = indexName;
+        String queryAllIndexAliasName = indexName +"_all";
         String typeName = "attr";
         
-		elasticIndexing = new TwitterElasticSearchIndexing(client, queryIndexAliasName, insertIndexAliasName, indexName, typeName, maxEachAliasIndexSize, maxIndexSize, numShards, replicationFactor, 0);
+		elasticIndexing = new TwitterElasticSearchIndexing(client, queryIndexAliasName, insertIndexAliasName, indexName, typeName, maxEachAliasIndexSize, maxIndexSize, numShards, replicationFactor, 0, queryAllIndexAliasName);
 	}
 	
 	public static void main(String[] args) {

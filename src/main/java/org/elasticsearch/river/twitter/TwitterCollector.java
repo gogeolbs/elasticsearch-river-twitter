@@ -51,6 +51,7 @@ public class TwitterCollector {
 	private final boolean collectOnlyGeoTweets;
 
 	private String queryIndexAliasName;
+	private String queryAllIndexAliasName;
 	private String insertIndexAliasName;
 	private String indexName;
 
@@ -331,10 +332,11 @@ public class TwitterCollector {
             Map<String, Object> indexSettings = (Map<String, Object>) riverSettings.settings().get("index");
             indexName = XContentMapValues.nodeStringValue(indexSettings.get("index"), "twitter");
             queryIndexAliasName = XContentMapValues.nodeStringValue(indexSettings.get("query_alias"), indexName);
-            insertIndexAliasName = queryIndexAliasName +"_index";
+            queryAllIndexAliasName = XContentMapValues.nodeStringValue(indexSettings.get("query_all_index_alias"), indexName);
+            insertIndexAliasName = queryAllIndexAliasName +"_index";
             maxEachAliasIndexSize = XContentMapValues.nodeLongValue(indexSettings.get("max_each_alias_index_size"), DEFAULT_MAX_EACH_INDEX_SIZE);
             maxIndexSize = XContentMapValues.nodeLongValue(indexSettings.get("max_index_size"), DEFAULT_MAX_INDEX_SIZE);
-            typeName = XContentMapValues.nodeStringValue(indexSettings.get("type"), "status");
+            typeName = XContentMapValues.nodeStringValue(indexSettings.get("type"), "attr");
             this.bulkSize = XContentMapValues.nodeIntegerValue(indexSettings.get("bulk_size"), 100);
             this.bulkFlushInterval = TimeValue.parseTimeValue(XContentMapValues.nodeStringValue(
                     indexSettings.get("flush_interval"), "5s"), TimeValue.timeValueSeconds(DEFAULT_REFRESH_TIME));
@@ -345,10 +347,11 @@ public class TwitterCollector {
         } else {
             indexName = "twitter";
             queryIndexAliasName = indexName;
-            insertIndexAliasName = queryIndexAliasName +"_index";
+            queryAllIndexAliasName = indexName;
+            insertIndexAliasName = queryAllIndexAliasName +"_index";
             maxEachAliasIndexSize = DEFAULT_MAX_EACH_INDEX_SIZE;
             maxIndexSize = DEFAULT_MAX_INDEX_SIZE;
-            typeName = "status";
+            typeName = "attr";
             bulkSize = DEFAULT_BULK_SIZE;
             numShards = DEFAULT_NUM_SHARDS;
             replicationFactor = DEFAULT_REPLICATION_FACTOR;
@@ -397,7 +400,7 @@ public class TwitterCollector {
 			elasticSearchIndexing = new TwitterElasticSearchIndexing(client,
 					queryIndexAliasName, insertIndexAliasName, indexName,
 					typeName, maxEachAliasIndexSize, maxIndexSize, numShards,
-					replicationFactor, numIndexesToQuery);
+					replicationFactor, numIndexesToQuery, queryAllIndexAliasName);
 			
 			/*
 			 * The master node controls the index size and the time to create a
