@@ -9,6 +9,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.codehaus.jackson.map.util.LRUMap;
 import org.elasticsearch.river.twitter.connection.TwitterConnectionControl;
 import org.elasticsearch.threadpool.ThreadPool;
 
@@ -26,6 +27,8 @@ import org.javaswift.joss.model.StoredObject;
 
 public class FileStatusHandler extends StatusAdapter {
 
+	private LRUMap<String, Object> lruMap = new LRUMap<String, Object>(100000, 100000);
+	
 	private ThreadPool threadPool;
 	private BufferedWriter bw = null;
 	private long maxNumTweetsEachFile;
@@ -36,6 +39,7 @@ public class FileStatusHandler extends StatusAdapter {
 	private TwitterConnectionControl conn;
 	private AtomicLong numTweetsCollected;
 	private AtomicLong numTweetsNotCollected;
+	private AtomicLong numRepeatedTweets;
 	private String url;
 	private String username;
 	private String password;
@@ -45,7 +49,7 @@ public class FileStatusHandler extends StatusAdapter {
 	public FileStatusHandler(BufferedWriter bw,
 			long maxNumTweetsEachFile, String outFilePath,
 			long numTweetsInFile, String boundRegion,
-			TwitterConnectionControl conn, AtomicLong numTweetsCollected, AtomicLong numTweetsNotCollected,
+			TwitterConnectionControl conn, AtomicLong numTweetsCollected, AtomicLong numTweetsNotCollected,AtomicLong numRepeatedTweets,
 			String url, String username, String password, String containerName) {
 		this.bw = bw;
 		this.maxNumTweetsEachFile = maxNumTweetsEachFile;
@@ -55,6 +59,7 @@ public class FileStatusHandler extends StatusAdapter {
 		this.conn = conn;
 		this.numTweetsCollected = numTweetsCollected;
 		this.numTweetsNotCollected = numTweetsNotCollected;
+		this.numRepeatedTweets = numRepeatedTweets;
 		this.url = url;
 		this.username = username;
 		this.password = password;
@@ -67,6 +72,14 @@ public class FileStatusHandler extends StatusAdapter {
 	@Override
 	public void onStatus(Status status) {
 		try {
+			String id = Long.toString(status.getId());
+			//Verify if the tweet was already inserted
+			if(lruMap.containsKey(id)) {
+				numRepeatedTweets.incrementAndGet();
+				return;
+			}
+			lruMap.put(id, null);
+			
 			numTweetsCollected.incrementAndGet();
 			String rawJSON = TwitterObjectFactory.getRawJSON(status);
 			bw.write(rawJSON +"\n");

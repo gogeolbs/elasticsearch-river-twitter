@@ -97,6 +97,7 @@ public class TwitterCollector {
 	
 	private AtomicLong numTweetsCollected;
 	private AtomicLong numTweetsNotCollected;
+	private AtomicLong numRepeatedTweets;
 
 	@SuppressWarnings({ "unchecked", "resource" })
 	public static void main(String[] args) throws IOException {
@@ -362,6 +363,7 @@ public class TwitterCollector {
         
         numTweetsCollected = new AtomicLong(0);
         numTweetsNotCollected = new AtomicLong(0);
+        numRepeatedTweets = new AtomicLong(0);
     }
 
 	public void start() {
@@ -371,16 +373,17 @@ public class TwitterCollector {
 		timer.schedule(new TimerTask() {
 			@Override
 			public void run() {
-				System.out.println(new Date().toString() +".Tweets Collected: " +numTweetsCollected +". Tweets NOT Collected: " +numTweetsNotCollected +" in a minute.");
+				System.out.println(new Date().toString() +".Tweets Collected: " +numTweetsCollected +". Tweets NOT Collected: " +numTweetsNotCollected +". Repeated tweets: " +numRepeatedTweets +" in a minute. ");
 				numTweetsCollected.set(0);
 				numTweetsNotCollected.set(0);
+				numRepeatedTweets.set(0);
 			}
 		}, time, time);
 
 		//If is only to write tweets on File, so start the twitter stream.
 		if(writeTweetsOnFile) {
 			FileStatusHandler fileStatusHandler = new FileStatusHandler(bw, maxNumTweetsEachFile, outFilePath, numTweetsInFile, 
-					boundRegion, conn, numTweetsCollected, numTweetsNotCollected, url, username, password, containerName);
+					boundRegion, conn, numTweetsCollected, numTweetsNotCollected, numRepeatedTweets, url, username, password, containerName);
 			if(!conn.startTwitterStream(fileStatusHandler, twitterFiltering.getFilterQuery())){
 				System.err.println("Error to init twitter stream");
 				System.exit(0);
@@ -443,7 +446,7 @@ public class TwitterCollector {
 		conn.setBulkProcessor(bulkProcessor);
 		
 		StatusHandler statusHandler = new StatusHandler(writeTweetsOnFile, collectOnlyGeoTweets, autoGenerateGeoPointFromPlace, 
-				ignoreRetweet, geoAsArray, insertIndexAliasName, typeName, bulkProcessor, indexName, conn, numTweetsCollected, numTweetsNotCollected);
+				ignoreRetweet, geoAsArray, insertIndexAliasName, typeName, bulkProcessor, indexName, conn, numTweetsCollected, numTweetsNotCollected, numRepeatedTweets);
 		
 		if(!conn.startTwitterStream(statusHandler, twitterFiltering.getFilterQuery())){
 			System.err.println("Error to init twitter stream");

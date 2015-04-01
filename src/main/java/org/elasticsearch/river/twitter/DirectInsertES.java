@@ -10,6 +10,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Properties;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -19,6 +20,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+import org.codehaus.jackson.map.util.LRUMap;
 import org.elasticsearch.action.WriteConsistencyLevel;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
@@ -58,6 +60,8 @@ public class DirectInsertES {
 	private static final int DEFAULT_NUM_SHARDS = 5;
 	private static final int DEFAULT_REPLICATION_FACTOR = 1;
 	private static final int BULK_SIZE = 1500;
+	
+	private static Map<String, Object> lruMap = new LRUMap<String, Object>(100000, 100000);
 	
 	@SuppressWarnings("resource")
 	public DirectInsertES(String[] seeds, String elasticCluster, String indexName, long maxEachAliasIndexSize, long maxIndexSize, int numShards, int replicationFactor) throws Exception {
@@ -241,6 +245,12 @@ public class DirectInsertES {
 				
 				Status status = TwitterObjectFactory.createStatus(line);
 				id = Long.toString(status.getId());
+				
+				//Verify if the tweet was already inserted
+				if(lruMap.containsKey(id))
+					continue;
+				lruMap.put(id, null);
+				
 				xBuilder = TwitterInsertBuilder.constructInsertBuilder(status, true, false);
 				
 				if(xBuilder == null)

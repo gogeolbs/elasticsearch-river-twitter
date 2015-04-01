@@ -2,6 +2,7 @@ package org.elasticsearch.river.twitter.handlers;
 
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.codehaus.jackson.map.util.LRUMap;
 import org.elasticsearch.action.WriteConsistencyLevel;
 import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.action.support.replication.ReplicationType;
@@ -17,6 +18,8 @@ import twitter4j.StatusDeletionNotice;
 
 public class StatusHandler extends StatusAdapter {
 
+	private LRUMap<String, Object> lruMap = new LRUMap<String, Object>(100000, 100000);
+	
 	boolean writeTweetsOnFile;
 	boolean collectOnlyGeoTweets;
 	boolean autoGenerateGeoPointFromPlace;
@@ -30,13 +33,14 @@ public class StatusHandler extends StatusAdapter {
 	private TwitterConnectionControl conn;
 	private AtomicLong numTweetsCollected;
 	private AtomicLong numTweetsNotCollected;
+	private AtomicLong numRepeatedTweets;
 
 	public StatusHandler(boolean writeTweetsOnFile,
 			boolean collectOnlyGeoTweets,
 			boolean autoGenerateGeoPointFromPlace, boolean ignoreRetweet,
 			boolean geoAsArray, String insertIndexAliasName, String typeName,
 			BulkProcessor bulkProcessor, String indexName,
-			TwitterConnectionControl conn, AtomicLong numTweetsCollected, AtomicLong numTweetsNotCollected) {
+			TwitterConnectionControl conn, AtomicLong numTweetsCollected, AtomicLong numTweetsNotCollected, AtomicLong numRepeatedTweets) {
 		this.writeTweetsOnFile = writeTweetsOnFile;
 		this.collectOnlyGeoTweets = collectOnlyGeoTweets;
 		this.autoGenerateGeoPointFromPlace = autoGenerateGeoPointFromPlace;
@@ -49,6 +53,7 @@ public class StatusHandler extends StatusAdapter {
 		this.conn = conn;
 		this.numTweetsCollected = numTweetsCollected;
 		this.numTweetsNotCollected = numTweetsNotCollected;
+		this.numRepeatedTweets = numRepeatedTweets;
 		
 		this.threadPool = new ThreadPool("status-twitter");
 	}
@@ -67,6 +72,14 @@ public class StatusHandler extends StatusAdapter {
 					&& (status.getPlace() == null || (status.getPlace() != null && !autoGenerateGeoPointFromPlace)))
 				return;
 
+			String id = Long.toString(status.getId());
+			//Verify if the tweet was already inserted
+			if(lruMap.containsKey(id)) {
+				numRepeatedTweets.incrementAndGet();
+				return;
+			}
+			lruMap.put(id, null);
+			
 			numTweetsCollected.incrementAndGet();
 			// #24: We want to ignore retweets (default to false)
 			// https://github.com/elasticsearch/elasticsearch-river-twitter/issues/24
@@ -81,11 +94,12 @@ public class StatusHandler extends StatusAdapter {
 				if(builder == null)
 					return;
 				
+				
 				bulkProcessor.add(Requests
 						.indexRequest(insertIndexAliasName)
 						.consistencyLevel(WriteConsistencyLevel.ONE)
 						.replicationType(ReplicationType.ASYNC)
-						.type(typeName).id(Long.toString(status.getId()))
+						.type(typeName).id(id)
 						.source(builder));
 			}
 		} catch (Exception e) {
