@@ -1,5 +1,6 @@
 package org.elasticsearch.river.twitter.handlers;
 
+import java.util.HashSet;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.codehaus.jackson.map.util.LRUMap;
@@ -58,9 +59,22 @@ public class StatusHandler extends StatusAdapter {
 		this.threadPool = new ThreadPool("status-twitter");
 	}
 	
+	private HashSet<String> set = new HashSet<String>();
+	
 	@Override
 	public void onStatus(Status status) {
 		try {
+			if(status.isRetweet()) {
+				String key = status.getUser().getId() +"\t" +status.getRetweetedStatus().getId();
+				synchronized (key.intern()) {
+					if(!set.contains(key)) {
+						set.add(key);
+						System.out.println(key);
+					}
+				}
+			} else
+				return;
+			
 			/*
 			 * Return when it should collect only tweets with geo location
 			 * and: 1 - Tweets not contains geo location, or 2 - When the
@@ -81,6 +95,8 @@ public class StatusHandler extends StatusAdapter {
 			lruMap.put(id, null);
 			
 			numTweetsCollected.incrementAndGet();
+			
+			
 			// #24: We want to ignore retweets (default to false)
 			// https://github.com/elasticsearch/elasticsearch-river-twitter/issues/24
 			if (status.isRetweet() && ignoreRetweet) {
