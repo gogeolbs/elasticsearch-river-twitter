@@ -13,19 +13,22 @@ import twitter4j.Status;
 import twitter4j.URLEntity;
 import twitter4j.UserMentionEntity;
 
+import com.vividsolutions.jts.geom.Point;
+
 public class TwitterInsertBuilder {
 
 	public static XContentBuilder constructInsertBuilder(Status status, boolean autoGenerateGeoPointFromPlace, boolean geoAsArray) throws IOException{
-		String location = null;
+		Point location = null;
         
         if(status.getGeoLocation() != null){
     		double latitude = status.getGeoLocation().getLatitude();
     		double longitude = status.getGeoLocation().getLongitude();
-    		location = latitude +"," + longitude;
+    		SpatialUtils.createPoint(latitude, longitude);
     	}
         
-        if(location == null && status.getPlace() != null && autoGenerateGeoPointFromPlace)
+        if(location == null && status.getPlace() != null && autoGenerateGeoPointFromPlace) {
         	location = generateGeoPointFromPlace(status);
+        }
         
         if(location == null)
         	return null;
@@ -33,7 +36,15 @@ public class TwitterInsertBuilder {
         XContentBuilder builder = XContentFactory.jsonBuilder().startObject();
         
         //root informations
-        builder.field("location", location);
+        
+        //location
+        builder.field( "_geom_centroid", convertToElasticLocation(location));
+        builder.field("_geom_height", 0);
+        builder.field("_geom_width", 0);
+        builder.rawField("_the_geom", SpatialUtils.toJson(location).toLowerCase().getBytes());
+        builder.field("_geom_bytes", SpatialUtils.serialize(location));
+        
+        //Tweet attributes
         builder.field("created_at", status.getCreatedAt());
         builder.field("id", status.getId());
         builder.field("text", status.getText());
@@ -287,7 +298,7 @@ public class TwitterInsertBuilder {
         return builder.startArray().value(x).value(y).endArray();
     }
 	 
-	 private static String generateGeoPointFromPlace(Status status){
+	 private static Point generateGeoPointFromPlace(Status status){
      	GeoLocation[][] boundingBoxCoordinates = status.getPlace().getBoundingBoxCoordinates();
  		if(boundingBoxCoordinates != null && boundingBoxCoordinates.length > 0){
  			GeoLocation[] geoLocations = boundingBoxCoordinates[0];
@@ -296,18 +307,20 @@ public class TwitterInsertBuilder {
  			double maxy = geoLocations[1].getLatitude();
  			double maxx = geoLocations[2].getLongitude();
  			
-// 			double x = minx + Math.random() * (maxx - minx);
-// 			double y = miny + Math.random() * (maxy - miny);
  			double x_add = (maxx - minx) / 2;
  			double x = minx + x_add;
  			double y_add = (maxy - miny) / 2;
  			double y = miny + y_add;
  			if(y == 0 && x == 0)
  				return null;
- 			return y +"," + x;
+ 			return SpatialUtils.createPoint(y, x);
  		}
  		return null;
      }
+	 
+	 private static String convertToElasticLocation(Point point) {
+	     return point.getY() +"," +point.getX();
+	 }
 	 
 	 private static void constructBuilderSize(String type, Size size, XContentBuilder builder) throws IOException{
 		 if(size == null)

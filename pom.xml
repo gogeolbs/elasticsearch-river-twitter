@@ -50,6 +50,17 @@
 
 	<dependencies>
 		<dependency>
+			<groupId>org.geotools</groupId>
+			<artifactId>gt-geojson</artifactId>
+			<version>11.1</version>
+		</dependency>
+		<dependency>
+			<groupId>com.vividsolutions</groupId>
+			<artifactId>jts</artifactId>
+			<version>1.13</version>
+			<scope>compile</scope>
+		</dependency>
+		<dependency>
 			<groupId>org.javaswift</groupId>
 			<artifactId>joss</artifactId>
 			<version>0.9.8</version>
