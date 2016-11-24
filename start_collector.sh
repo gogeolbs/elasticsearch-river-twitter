@@ -1,0 +1,1 @@
+java -jar collector.jar $ES_HOST $ES_INDEX $ES_CLUSTER $TWITTER_PROPERTIES

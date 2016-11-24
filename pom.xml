@@ -183,16 +183,16 @@
 						</goals>
 					</execution>
 					<execution>
-						<id>direct-insert</id>
+						<id>twitter-collector</id>
 						<phase>package</phase>
 						<goals>
 							<goal>single</goal>
 						</goals>
 						<configuration>
-							<finalName>direct-insert</finalName>
+							<finalName>collector</finalName>
 							<archive>
 								<manifest>
-									<mainClass>org.elasticsearch.river.twitter.DirectInsertES</mainClass>
+									<mainClass>org.elasticsearch.river.twitter.TwitterCollector</mainClass>
 								</manifest>
 							</archive>
 							<descriptorRefs>

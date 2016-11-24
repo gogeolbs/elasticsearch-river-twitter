@@ -23,7 +23,7 @@ public class TwitterInsertBuilder {
         if(status.getGeoLocation() != null){
     		double latitude = status.getGeoLocation().getLatitude();
     		double longitude = status.getGeoLocation().getLongitude();
-    		SpatialUtils.createPoint(latitude, longitude);
+    		location = SpatialUtils.createPoint(latitude, longitude);
     	}
         
         if(location == null && status.getPlace() != null && autoGenerateGeoPointFromPlace) {
@@ -318,8 +318,8 @@ public class TwitterInsertBuilder {
  		return null;
      }
 	 
-	 private static String convertToElasticLocation(Point point) {
-	     return point.getY() +"," +point.getX();
+	 private static double[] convertToElasticLocation(Point point) {
+	     return new double[] { point.getX(), point.getY() };
 	 }
 	 
 	 private static void constructBuilderSize(String type, Size size, XContentBuilder builder) throws IOException{
